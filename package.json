@@ -1,0 +1,62 @@
+{
+  "name": "@gliese-watch/events",
+  "version": "0.1.0",
+  "description": "Event registry for EVM protocol control changes: proxy upgrades, admin keys, Safe signers, timelocks, roles and vault governance, plus a role-name registry",
+  "license": "MIT",
+  "author": "Halil Beydilli",
+  "homepage": "https://gliese.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/halilbeydilli/gliese-events.git"
+  },
+  "bugs": {
+    "url": "https://github.com/halilbeydilli/gliese-events/issues"
+  },
+  "keywords": [
+    "ethereum",
+    "evm",
+    "smart-contracts",
+    "security",
+    "governance",
+    "viem",
+    "typescript",
+    "proxy-upgrade",
+    "gnosis-safe",
+    "timelock",
+    "access-control",
+    "event-signatures",
+    "topic0"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "categories": "npm run build && node scripts/categories.mjs"
+  },
+  "dependencies": {
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
+  }
+}
