@@ -32,9 +32,10 @@ export interface WatchedEvent {
  * Adding an entry: pick a stable `<family>.<snake_case>` key, keep the description one line, add
  * the human phrasing in apps/notifier (DESCRIBERS), apps/publisher (PHRASERS, digest KEY_*) and
  * apps/web/lib/describe.ts, and bump the topic0 count asserted in test/events.test.ts
- * (265 unique signatures / 221 keys since Aave V4 on 2026-09-26; 239 / 195 after coverage batch 2 on
- * 2026-09-23; 194 / 153 after coverage batch 1 on 2026-09-22; 116 / 96 with Morpho Vault V2 earlier
- * the same day; 88 / 78 on 2026-09-18; 57 / 54 before the vault governance family).
+ * (284 unique signatures / 236 keys since the Venus Diamond + ResilientOracle batch on 2026-09-28;
+ * 265 / 221 since Aave V4 on 2026-09-26; 239 / 195 after coverage batch 2 on 2026-09-23; 194 / 153
+ * after coverage batch 1 on 2026-09-22; 116 / 96 with Morpho Vault V2 earlier the same day; 88 / 78
+ * on 2026-09-18; 57 / 54 before the vault governance family).
  * Setup-noise anchors live in decode.ts (detectInit). A key normally maps to one topic0; the
  * exceptions are `auth.file` (four MakerDAO overloads with different param types) and the vault
  * umbrella keys `vault.pending_revoked` (four RevokePending* events), `vault.params_set` (five
@@ -48,6 +49,10 @@ export interface WatchedEvent {
  * `lending.flashloan_premium_updated`), `lending.action_paused` and `protocol.fee_config_set`. Coverage
  * batch 2 (2026-09-23) added `rollup.config_updated` (SystemConfig + SuperchainConfig ConfigUpdate),
  * `rollup.sequencer_inbox_set` (Bridge + RollupAdmin) and `rollup.assertion_forced` (created + confirmed).
+ * The Venus batch (2026-09-28) put the Diamond Comptroller layouts under the Compound keys they
+ * restate: `lending.supply_cap_changed` (Aave SupplyCapChanged + Venus NewSupplyCap),
+ * `lending.collateral_factor_set` and `lending.liquidation_incentive_set` (Compound two/three-param +
+ * Venus (poolId, vToken) four-param) and a third `lending.action_paused` overload (ActionPausedMarket).
  */
 type Spec = readonly [string, Category, Severity, string, ...string[]];
 
@@ -1082,12 +1087,15 @@ const SPECS: readonly Spec[] = [
     'A reserve of an Aave V3-style market became borrowable or non-borrowable in isolation mode (BorrowableInIsolationChanged).',
     'event BorrowableInIsolationChanged(address asset, bool borrowable)',
   ],
+  // Two events, one key (2026-09-28): Aave SupplyCapChanged (whole tokens) and Venus NewSupplyCap
+  // (base units; SetterFacet.sol, the supply-side twin of NewBorrowCap below).
   [
     'lending.supply_cap_changed',
     'parameters',
     'high',
-    'The supply cap of a reserve in an Aave V3-style market was changed (SupplyCapChanged, whole tokens; 0 = no cap).',
+    'The supply cap of a lending market was changed (Aave SupplyCapChanged in whole tokens or Venus NewSupplyCap in base units; 0 = no cap).',
     'event SupplyCapChanged(address indexed asset, uint256 oldSupplyCap, uint256 newSupplyCap)',
+    'event NewSupplyCap(address indexed vToken, uint256 newSupplyCap)',
   ],
   // Two events, one key: Aave BorrowCapChanged (whole tokens) and Compound-style NewBorrowCap
   // (base units) both cap the borrows of one market.
@@ -1215,12 +1223,15 @@ const SPECS: readonly Spec[] = [
     'A pending admin was set on a Compound-style contract, waiting to be accepted (NewPendingAdmin).',
     'event NewPendingAdmin(address oldPendingAdmin, address newPendingAdmin)',
   ],
+  // Two events, one key (2026-09-28): the Compound three-param form and the Venus Diamond form keyed
+  // by (poolId, vToken), both indexed (SetterFacet.sol; poolId 0 is the core pool).
   [
     'lending.collateral_factor_set',
     'parameters',
     'high',
-    'The collateral factor of a Compound-style market was changed (NewCollateralFactor, 1e18 mantissa).',
+    'The collateral factor of a Compound-style or Venus market was changed (NewCollateralFactor, 1e18 mantissa).',
     'event NewCollateralFactor(address cToken, uint256 oldCollateralFactorMantissa, uint256 newCollateralFactorMantissa)',
+    'event NewCollateralFactor(uint96 indexed poolId, address indexed vToken, uint256 oldCollateralFactorMantissa, uint256 newCollateralFactorMantissa)',
   ],
   [
     'lending.close_factor_set',
@@ -1229,12 +1240,15 @@ const SPECS: readonly Spec[] = [
     'The close factor (share of a borrow one liquidation may repay) of a Compound-style Comptroller was changed (NewCloseFactor, 1e18 mantissa).',
     'event NewCloseFactor(uint256 oldCloseFactorMantissa, uint256 newCloseFactorMantissa)',
   ],
+  // Two events, one key (2026-09-28): Compound's Comptroller-wide incentive and Venus's per-market one
+  // keyed by (poolId, vToken).
   [
     'lending.liquidation_incentive_set',
     'parameters',
     'high',
-    'The liquidation incentive of a Compound-style Comptroller was changed (NewLiquidationIncentive, 1e18 mantissa).',
+    'The liquidation incentive of a Compound-style Comptroller or of one Venus market was changed (NewLiquidationIncentive, 1e18 mantissa).',
     'event NewLiquidationIncentive(uint256 oldLiquidationIncentiveMantissa, uint256 newLiquidationIncentiveMantissa)',
+    'event NewLiquidationIncentive(uint96 indexed poolId, address indexed vToken, uint256 oldLiquidationIncentiveMantissa, uint256 newLiquidationIncentiveMantissa)',
   ],
   [
     'lending.pause_guardian_set',
@@ -1250,21 +1264,26 @@ const SPECS: readonly Spec[] = [
     'The borrow cap guardian of a Compound-style Comptroller was changed (NewBorrowCapGuardian).',
     'event NewBorrowCapGuardian(address oldBorrowCapGuardian, address newBorrowCapGuardian)',
   ],
-  // Two overloads, one key: a global action (mint / borrow / transfer / seize) or one market's.
+  // Three signatures, one key: a global Compound action (mint / borrow / transfer / seize), one
+  // market's, or (2026-09-28) Venus's ActionPausedMarket with a numeric Action (0 MINT, 1 REDEEM,
+  // 2 BORROW, 3 REPAY, 4 SEIZE, 5 LIQUIDATE, 6 TRANSFER, 7 ENTER_MARKET, 8 EXIT_MARKET).
   [
     'lending.action_paused',
     'pause',
     'high',
-    'An action of a Compound-style Comptroller was paused or unpaused, globally or for one market (ActionPaused).',
+    'An action of a Compound-style or Venus Comptroller was paused or unpaused, globally or for one market (ActionPaused or ActionPausedMarket).',
     'event ActionPaused(string action, bool pauseState)',
     'event ActionPaused(address cToken, string action, bool pauseState)',
+    'event ActionPausedMarket(address indexed vToken, uint8 indexed action, bool pauseState)',
   ],
+  // Two layouts, one topic0: Compound emits the market in the data, Venus (MarketFacet.sol) indexes it.
   [
     'lending.market_listed',
     'parameters',
     'info',
-    'A market was listed on a Compound-style Comptroller (MarketListed).',
+    'A market was listed on a Compound-style or Venus Comptroller (MarketListed).',
     'event MarketListed(address cToken)',
+    'event MarketListed(address indexed vToken)',
   ],
   [
     'lending.comptroller_set',
@@ -1272,6 +1291,127 @@ const SPECS: readonly Spec[] = [
     'critical',
     'The Comptroller (risk engine) of a Compound-style market was changed (NewComptroller).',
     'event NewComptroller(address oldComptroller, address newComptroller)',
+  ],
+
+  // ---- Venus core-pool Comptroller (Diamond) and ResilientOracle (2026-09-28) ---------------------
+  // VenusProtocol/venus-protocol develop: contracts/Comptroller/Diamond/facets/SetterFacet.sol,
+  // MarketFacet.sol, FacetBase.sol and ComptrollerInterface.sol (enum Action); VenusProtocol/oracle
+  // develop: contracts/ResilientOracle.sol (enum OracleRole: 0 MAIN, 1 PIVOT, 2 FALLBACK). Read after
+  // VIP-663 executed on BNB (tx 0x0592453d…a426, block 124462424): its receipt carried nine control
+  // logs the Compound-shaped block above did not decode. Venus forks the Compound V2 setters with its
+  // own layouts (see the shared keys above: NewSupplyCap, the (poolId, vToken) NewCollateralFactor /
+  // NewLiquidationIncentive, ActionPausedMarket, the indexed MarketListed); NewCloseFactor,
+  // NewPauseGuardian, NewPriceOracle and NewBorrowCap hash the same as Compound's and are not repeated.
+  // `VToken` / `ResilientOracleInterface` / `IDeviationBoundedOracle` parameters are addresses, the
+  // `Action` enum is uint8. Not watched: XVS / VAI / Prime reward wiring (NewXVSToken, NewXVSVToken,
+  // NewPrimeToken, NewVAIController, NewVAIMintRate, NewVenusVAIVaultRate, NewVAIVaultInfo), the
+  // treasury share (NewTreasuryAddress, NewTreasuryPercent), the flash-loan whitelist and the e-mode
+  // pool bookkeeping (PoolCreated, PoolLabelUpdated, PoolActiveStatusUpdated, PoolFallbackStatusUpdated,
+  // PoolMarketInitialized, PoolMarketRemoved, PoolSelected): accounting and grouping, not control.
+  [
+    'lending.protocol_paused',
+    'pause',
+    'critical',
+    'A whole Venus Comptroller was paused or unpaused (ActionProtocolPaused): every market action is blocked while paused.',
+    'event ActionProtocolPaused(bool state)',
+  ],
+  [
+    'lending.flash_loan_paused',
+    'pause',
+    'high',
+    'Flash loans on a Venus Comptroller were paused or unpaused (FlashLoanPauseChanged).',
+    'event FlashLoanPauseChanged(bool oldPaused, bool newPaused)',
+  ],
+  [
+    'lending.liquidation_threshold_set',
+    'parameters',
+    'high',
+    'The liquidation threshold of a Venus market was changed (NewLiquidationThreshold, 1e18 mantissa, per e-mode pool; poolId 0 is the core pool).',
+    'event NewLiquidationThreshold(uint96 indexed poolId, address indexed vToken, uint256 oldLiquidationThresholdMantissa, uint256 newLiquidationThresholdMantissa)',
+  ],
+  [
+    'lending.borrow_allowed_changed',
+    'parameters',
+    'high',
+    'Borrowing of a Venus market was enabled or disabled inside an e-mode pool (BorrowAllowedUpdated).',
+    'event BorrowAllowedUpdated(uint96 indexed poolId, address indexed market, bool oldStatus, bool newStatus)',
+  ],
+  [
+    'lending.forced_liquidation_set',
+    'parameters',
+    'high',
+    'Forced liquidation (positions liquidatable regardless of health) was enabled or disabled for a Venus market (IsForcedLiquidationEnabledUpdated).',
+    'event IsForcedLiquidationEnabledUpdated(address indexed vToken, bool enable)',
+  ],
+  [
+    'lending.market_unlisted',
+    'parameters',
+    'high',
+    'A market was unlisted from a Venus Comptroller (MarketUnlisted).',
+    'event MarketUnlisted(address indexed vToken)',
+  ],
+  [
+    'lending.access_control_set',
+    'access',
+    'critical',
+    'The AccessControlManager of a Venus Comptroller (who may call every guarded setter) was changed (NewAccessControl).',
+    'event NewAccessControl(address oldAccessControlAddress, address newAccessControlAddress)',
+  ],
+  [
+    'lending.comptroller_lens_set',
+    'upgrade',
+    'critical',
+    'The ComptrollerLens (the contract that computes account liquidity and seize amounts for a Venus Comptroller) was changed (NewComptrollerLens).',
+    'event NewComptrollerLens(address oldComptrollerLens, address newComptrollerLens)',
+  ],
+  [
+    'lending.treasury_guardian_set',
+    'access',
+    'high',
+    'The treasury guardian of a Venus Comptroller was changed (NewTreasuryGuardian).',
+    'event NewTreasuryGuardian(address oldTreasuryGuardian, address newTreasuryGuardian)',
+  ],
+  [
+    'lending.liquidator_set',
+    'access',
+    'high',
+    'The Liquidator contract of a Venus Comptroller (the only caller allowed to liquidate while set) was changed (NewLiquidatorContract).',
+    'event NewLiquidatorContract(address oldLiquidatorContract, address newLiquidatorContract)',
+  ],
+  [
+    'lending.deviation_oracle_set',
+    'parameters',
+    'critical',
+    'The deviation-bounded oracle of a Venus Comptroller was changed (NewDeviationBoundedOracle).',
+    'event NewDeviationBoundedOracle(address oldDeviationBoundedOracle, address newDeviationBoundedOracle)',
+  ],
+  [
+    'oracle.token_config_set',
+    'parameters',
+    'critical',
+    'A Venus ResilientOracle set the main / pivot / fallback oracles of an asset (TokenConfigAdded; the zero address means no oracle in that role).',
+    'event TokenConfigAdded(address indexed asset, address indexed mainOracle, address indexed pivotOracle, address fallbackOracle)',
+  ],
+  [
+    'oracle.role_oracle_set',
+    'parameters',
+    'critical',
+    'A Venus ResilientOracle changed the oracle in one role of an asset (OracleSet; role 0 main, 1 pivot, 2 fallback).',
+    'event OracleSet(address indexed asset, address indexed oracle, uint256 indexed role)',
+  ],
+  [
+    'oracle.role_oracle_enabled',
+    'parameters',
+    'high',
+    'A Venus ResilientOracle enabled or disabled the oracle in one role of an asset (OracleEnabled; role 0 main, 1 pivot, 2 fallback).',
+    'event OracleEnabled(address indexed asset, uint256 indexed role, bool indexed enable)',
+  ],
+  [
+    'oracle.caching_set',
+    'parameters',
+    'info',
+    'A Venus ResilientOracle enabled or disabled price caching for an asset (CachedEnabled).',
+    'event CachedEnabled(address indexed asset, bool indexed enabled)',
   ],
 
   // ---- Euler v2 GenericFactory and ProtocolConfig (2026-09-22) ----------------------------------

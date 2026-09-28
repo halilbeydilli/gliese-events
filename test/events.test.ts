@@ -83,6 +83,11 @@ describe('@gliese/events registry', () => {
     'rollup.config_updated',
     'rollup.sequencer_inbox_set',
     'rollup.assertion_forced',
+    // Venus Diamond Comptroller (2026-09-28): Aave / Compound layout + the Venus one under the same fact
+    // (lending.action_paused and lending.borrow_cap_changed were already overloaded above)
+    'lending.supply_cap_changed',
+    'lending.collateral_factor_set',
+    'lending.liquidation_incentive_set',
   ]);
 
   it('entries sharing a key share a topic0 (except declared overload keys), and each (key, layout) is unique', () => {
@@ -132,9 +137,9 @@ describe('@gliese/events registry', () => {
     }
   });
 
-  it('watches 265 unique topic0 signatures under 221 keys (239 / 195 after batch 2, 194 / 153 after batch 1, 116 / 96 with Vault V2, 88 / 78 on 2026-09-18, 57 / 54 before the vault governance family)', () => {
-    expect(TOPIC0S.length).toBe(265);
-    expect(new Set(EVENTS.map((e) => e.key)).size).toBe(221);
+  it('watches 284 unique topic0 signatures under 236 keys (265 / 221 with Aave V4, 239 / 195 after batch 2, 194 / 153 after batch 1, 116 / 96 with Vault V2, 88 / 78 on 2026-09-18, 57 / 54 before the vault governance family)', () => {
+    expect(TOPIC0S.length).toBe(284);
+    expect(new Set(EVENTS.map((e) => e.key)).size).toBe(236);
     expect(new Set(EVENTS.map((e) => e.category)).size).toBe(9);
     // auth.file accounts for 3 extra topic0s, vault.pending_revoked for 3 and vault.params_set for 4.
     expect(byKey('auth.file').length).toBe(4);
@@ -311,7 +316,8 @@ describe('@gliese/events registry', () => {
       'lending.debt_ceiling_changed': ['parameters', 'high', 'DebtCeilingChanged(address,uint256,uint256)'],
       'lending.siloed_borrowing_changed': ['parameters', 'high', 'SiloedBorrowingChanged(address,bool,bool)'],
       'lending.borrowable_in_isolation_changed': ['parameters', 'high', 'BorrowableInIsolationChanged(address,bool)'],
-      'lending.supply_cap_changed': ['parameters', 'high', 'SupplyCapChanged(address,uint256,uint256)'],
+      // NewSupplyCap joined on 2026-09-28 (Venus SetterFacet.sol), like NewBorrowCap on the next key.
+      'lending.supply_cap_changed': ['parameters', 'high', 'SupplyCapChanged(address,uint256,uint256)', 'NewSupplyCap(address,uint256)'],
       'lending.borrow_cap_changed': ['parameters', 'high', 'BorrowCapChanged(address,uint256,uint256)', 'NewBorrowCap(address,uint256)'],
       'lending.reserve_flash_loaning': ['parameters', 'high', 'ReserveFlashLoaning(address,bool)'],
       'lending.reserve_borrowing': ['parameters', 'high', 'ReserveBorrowing(address,bool)'],
@@ -327,12 +333,14 @@ describe('@gliese/events registry', () => {
       'lending.reserve_factor_changed': ['parameters', 'info', 'ReserveFactorChanged(address,uint256,uint256)', 'NewReserveFactor(uint256,uint256)'],
       'ownable.new_admin': ['ownership', 'critical', 'NewAdmin(address,address)'],
       'ownable.new_pending_admin': ['ownership', 'high', 'NewPendingAdmin(address,address)'],
-      'lending.collateral_factor_set': ['parameters', 'high', 'NewCollateralFactor(address,uint256,uint256)'],
+      // The (uint96 poolId, address vToken, ...) forms and ActionPausedMarket joined on 2026-09-28 (Venus SetterFacet.sol).
+      'lending.collateral_factor_set': ['parameters', 'high', 'NewCollateralFactor(address,uint256,uint256)', 'NewCollateralFactor(uint96,address,uint256,uint256)'],
       'lending.close_factor_set': ['parameters', 'high', 'NewCloseFactor(uint256,uint256)'],
-      'lending.liquidation_incentive_set': ['parameters', 'high', 'NewLiquidationIncentive(uint256,uint256)'],
+      'lending.liquidation_incentive_set': ['parameters', 'high', 'NewLiquidationIncentive(uint256,uint256)', 'NewLiquidationIncentive(uint96,address,uint256,uint256)'],
       'lending.pause_guardian_set': ['access', 'critical', 'NewPauseGuardian(address,address)'],
       'lending.borrow_cap_guardian_set': ['access', 'high', 'NewBorrowCapGuardian(address,address)'],
-      'lending.action_paused': ['pause', 'high', 'ActionPaused(string,bool)', 'ActionPaused(address,string,bool)'],
+      'lending.action_paused': ['pause', 'high', 'ActionPaused(string,bool)', 'ActionPaused(address,string,bool)', 'ActionPausedMarket(address,uint8,bool)'],
+      // Two layouts (Compound data / Venus indexed) under one topic0 since 2026-09-28; the loop below counts topic0s, not layouts.
       'lending.market_listed': ['parameters', 'info', 'MarketListed(address)'],
       'lending.comptroller_set': ['parameters', 'critical', 'NewComptroller(address,address)'],
       'beacon.implementation_set': ['upgrade', 'critical', 'SetImplementation(address)'],
@@ -351,20 +359,21 @@ describe('@gliese/events registry', () => {
     const seen = new Set<Hex>();
     for (const [key, [category, severity, ...signatures]] of Object.entries(want)) {
       const entries = byKey(key);
-      expect(entries.length, key).toBe(signatures.length);
       for (const ev of entries) {
         expect(ev.category, key).toBe(category);
         expect(ev.severity, key).toBe(severity);
       }
-      const topics = entries.map((e) => e.topic0).sort();
+      // Distinct topic0s per key: lending.market_listed carries two layouts of one signature (2026-09-28).
+      const topics = [...new Set(entries.map((e) => e.topic0))].sort();
+      expect(topics.length, key).toBe(signatures.length);
       expect(topics, key).toEqual(signatures.map((s) => keccak256(toBytes(s))).sort());
       for (const t of topics) {
         expect(seen.has(t), `${key} ${t}`).toBe(false);
         seen.add(t);
       }
     }
-    // 78 new topic0s + the 2 pre-existing OZ pause signatures.
-    expect(seen.size).toBe(80);
+    // 78 new topic0s + the 2 pre-existing OZ pause signatures + the 4 Venus layouts added to these keys on 2026-09-28.
+    expect(seen.size).toBe(84);
     // The two-param Compound NewAdmin / NewPendingAdmin are distinct from the one-param Timelock events.
     expect(firstByKey('ownable.new_admin').topic0).not.toBe(firstByKey('timelock.new_admin').topic0);
     expect(firstByKey('ownable.new_pending_admin').topic0).not.toBe(firstByKey('timelock.new_pending_admin').topic0);
@@ -601,6 +610,157 @@ describe('@gliese/events registry', () => {
     const granted = firstByKey('access.manager_role_granted');
     const g = decodeWatchedLog(encodeLog(granted.abi, { roleId: 200n, account: BOB, delay: 0, since: 1_790_000_000, newMember: true }))!;
     expect(g.args).toEqual({ roleId: '200', account: BOB.toLowerCase(), delay: 0, since: 1_790_000_000, newMember: true });
+  });
+
+  // ---- 2026-09-28: Venus core-pool Comptroller (Diamond facets) and ResilientOracle ----
+
+  it('registers the Venus Diamond Comptroller and ResilientOracle events with the agreed category / severity and byte-exact topic0s', () => {
+    // key: [category, severity, canonical signature]. Sources: VenusProtocol/venus-protocol develop
+    // contracts/Comptroller/Diamond/facets/SetterFacet.sol + MarketFacet.sol + ComptrollerInterface.sol (enum Action),
+    // VenusProtocol/oracle develop contracts/ResilientOracle.sol. Contract-typed params are addresses, Action is uint8.
+    const want: Record<string, [string, string, string]> = {
+      'lending.protocol_paused': ['pause', 'critical', 'ActionProtocolPaused(bool)'],
+      'lending.flash_loan_paused': ['pause', 'high', 'FlashLoanPauseChanged(bool,bool)'],
+      'lending.liquidation_threshold_set': ['parameters', 'high', 'NewLiquidationThreshold(uint96,address,uint256,uint256)'],
+      'lending.borrow_allowed_changed': ['parameters', 'high', 'BorrowAllowedUpdated(uint96,address,bool,bool)'],
+      'lending.forced_liquidation_set': ['parameters', 'high', 'IsForcedLiquidationEnabledUpdated(address,bool)'],
+      'lending.market_unlisted': ['parameters', 'high', 'MarketUnlisted(address)'],
+      'lending.access_control_set': ['access', 'critical', 'NewAccessControl(address,address)'],
+      'lending.comptroller_lens_set': ['upgrade', 'critical', 'NewComptrollerLens(address,address)'],
+      'lending.treasury_guardian_set': ['access', 'high', 'NewTreasuryGuardian(address,address)'],
+      'lending.liquidator_set': ['access', 'high', 'NewLiquidatorContract(address,address)'],
+      'lending.deviation_oracle_set': ['parameters', 'critical', 'NewDeviationBoundedOracle(address,address)'],
+      'oracle.token_config_set': ['parameters', 'critical', 'TokenConfigAdded(address,address,address,address)'],
+      'oracle.role_oracle_set': ['parameters', 'critical', 'OracleSet(address,address,uint256)'],
+      'oracle.role_oracle_enabled': ['parameters', 'high', 'OracleEnabled(address,uint256,bool)'],
+      'oracle.caching_set': ['parameters', 'info', 'CachedEnabled(address,bool)'],
+    };
+    expect(Object.keys(want)).toHaveLength(15);
+    for (const [key, [category, severity, signature]] of Object.entries(want)) {
+      const entries = byKey(key);
+      expect(entries.length, key).toBe(1);
+      const ev = entries[0]!;
+      expect(ev.category, key).toBe(category);
+      expect(ev.severity, key).toBe(severity);
+      expect(ev.topic0, key).toBe(keccak256(toBytes(signature)));
+    }
+    // The Venus layouts that joined existing keys re-derive from their canonical signatures.
+    const venusLayout = (key: string, sig: string) => byKey(key).find((e) => e.topic0 === keccak256(toBytes(sig)));
+    expect(venusLayout('lending.action_paused', 'ActionPausedMarket(address,uint8,bool)')?.abi.inputs.map((i) => i.name)).toEqual(['vToken', 'action', 'pauseState']);
+    expect(venusLayout('lending.supply_cap_changed', 'NewSupplyCap(address,uint256)')?.abi.inputs.map((i) => i.name)).toEqual(['vToken', 'newSupplyCap']);
+    expect(venusLayout('lending.collateral_factor_set', 'NewCollateralFactor(uint96,address,uint256,uint256)')?.abi.inputs[0]?.name).toBe('poolId');
+    expect(venusLayout('lending.liquidation_incentive_set', 'NewLiquidationIncentive(uint96,address,uint256,uint256)')?.abi.inputs[1]?.name).toBe('vToken');
+    expect(byKey('lending.market_listed').map((e) => e.abi.inputs[0]?.indexed ?? false).sort()).toEqual([false, true]);
+    expect(new Set(byKey('lending.market_listed').map((e) => e.topic0)).size).toBe(1);
+    // Byte-exact topic0s from the VIP-663 execution receipt on BNB (tx 0x0592453d…a426, block 124462424).
+    expect(venusLayout('lending.action_paused', 'ActionPausedMarket(address,uint8,bool)')?.topic0).toBe('0x35007a986bcd36d2f73fc7f1b73762e12eadb4406dd163194950fd3b5a6a827d');
+    expect(venusLayout('lending.supply_cap_changed', 'NewSupplyCap(address,uint256)')?.topic0).toBe('0x9e0ad9cee10bdf36b7fbd38910c0bdff0f275ace679b45b922381c2723d676f8');
+    expect(venusLayout('lending.collateral_factor_set', 'NewCollateralFactor(uint96,address,uint256,uint256)')?.topic0).toBe('0x0d1a615379dc62cec7bc63b7e313a07ed659918f4ad3720b3af8041b305146f2');
+    expect(firstByKey('oracle.token_config_set').topic0).toBe('0xa51ad01e2270c314a7b78f0c60fe66c723f2d06c121d63fcdce776e654878fc1');
+    expect(firstByKey('oracle.caching_set').topic0).toBe('0xca250c5374abedcbf71c0e3eda7ff4cf940fa9e6561d8cd31d2bf480a140a93f');
+    // Venus events that hash the same as Compound's stay on the Compound keys, not duplicated.
+    for (const [sig, key] of [
+      ['NewCloseFactor(uint256,uint256)', 'lending.close_factor_set'],
+      ['NewPauseGuardian(address,address)', 'lending.pause_guardian_set'],
+      ['NewPriceOracle(address,address)', 'lending.price_oracle_set'],
+      ['NewBorrowCap(address,uint256)', 'lending.borrow_cap_changed'],
+      ['MarketListed(address)', 'lending.market_listed'],
+    ] as const) {
+      expect(new Set(EVENTS_BY_TOPIC0.get(keccak256(toBytes(sig)))?.map((e) => e.key)), sig).toEqual(new Set([key]));
+    }
+  });
+
+  it('round-trips ActionPausedMarket and NewSupplyCap and decodes the nine VIP-663 receipt logs', () => {
+    const paused = byKey('lending.action_paused').find((e) => e.abi.name === 'ActionPausedMarket')!;
+    const p = decodeWatchedLog(encodeLog(paused.abi, { vToken: BOB, action: 7, pauseState: true }))!;
+    expect(p.event.key).toBe('lending.action_paused');
+    expect(p.event.severity).toBe('high');
+    expect(p.args).toEqual({ vToken: BOB.toLowerCase(), action: 7, pauseState: true });
+    expect(p.initAnchor).toBe(false);
+
+    const cap = byKey('lending.supply_cap_changed').find((e) => e.abi.name === 'NewSupplyCap')!;
+    const c = decodeWatchedLog(encodeLog(cap.abi, { vToken: ALICE, newSupplyCap: 2_100_000n * 10n ** 18n }))!;
+    expect(c.event.key).toBe('lending.supply_cap_changed');
+    expect(c.args).toEqual({ vToken: ALICE.toLowerCase(), newSupplyCap: '2100000000000000000000000' });
+
+    // Raw logs from eth_getTransactionReceipt(0x0592453d86d68a1b32a37c09a269ac69a9475a3de1edfb1ad3f6853d4706a426) on
+    // bsc-dataseed.bnbchain.org (2026-09-28): the nine control logs the registry did not decode before this batch.
+    const VTRX = '0xc5d3466aa484b040ee977073fcf337f2c00071c1';
+    const VLISUSD = '0x689e0dab47ab16bcae87ec18491692bf621dc6ab';
+    const THE = '0xf4c8e32eadec4bfe97e0f595add0f4450a863a11';
+    const receiptLogs: { logIndex: number; topics: Hex[]; data: Hex; key: string; args: Record<string, unknown> }[] = [
+      {
+        logIndex: 133,
+        topics: ['0xa51ad01e2270c314a7b78f0c60fe66c723f2d06c121d63fcdce776e654878fc1', '0x000000000000000000000000f4c8e32eadec4bfe97e0f595add0f4450a863a11', '0x0000000000000000000000001b2103441a0a108dad8848d8f5d790e4d402921f', '0x0000000000000000000000009e6928ec418948ceb9f1cd9872fd312b13d841d0'],
+        data: '0x0000000000000000000000000000000000000000000000000000000000000000',
+        key: 'oracle.token_config_set',
+        args: { asset: THE, mainOracle: '0x1b2103441a0a108dad8848d8f5d790e4d402921f', pivotOracle: '0x9e6928ec418948ceb9f1cd9872fd312b13d841d0', fallbackOracle: ZERO },
+      },
+      {
+        logIndex: 134,
+        topics: ['0xca250c5374abedcbf71c0e3eda7ff4cf940fa9e6561d8cd31d2bf480a140a93f', '0x000000000000000000000000f4c8e32eadec4bfe97e0f595add0f4450a863a11', '0x0000000000000000000000000000000000000000000000000000000000000000'],
+        data: '0x',
+        key: 'oracle.caching_set',
+        args: { asset: THE, enabled: false },
+      },
+      {
+        logIndex: 136,
+        topics: ['0x35007a986bcd36d2f73fc7f1b73762e12eadb4406dd163194950fd3b5a6a827d', '0x000000000000000000000000c5d3466aa484b040ee977073fcf337f2c00071c1', '0x0000000000000000000000000000000000000000000000000000000000000002'],
+        data: '0x0000000000000000000000000000000000000000000000000000000000000001',
+        key: 'lending.action_paused',
+        args: { vToken: VTRX, action: 2, pauseState: true },
+      },
+      {
+        logIndex: 137,
+        topics: ['0x35007a986bcd36d2f73fc7f1b73762e12eadb4406dd163194950fd3b5a6a827d', '0x000000000000000000000000c5d3466aa484b040ee977073fcf337f2c00071c1', '0x0000000000000000000000000000000000000000000000000000000000000007'],
+        data: '0x0000000000000000000000000000000000000000000000000000000000000001',
+        key: 'lending.action_paused',
+        args: { vToken: VTRX, action: 7, pauseState: true },
+      },
+      {
+        logIndex: 139,
+        topics: ['0x35007a986bcd36d2f73fc7f1b73762e12eadb4406dd163194950fd3b5a6a827d', '0x000000000000000000000000689e0dab47ab16bcae87ec18491692bf621dc6ab', '0x0000000000000000000000000000000000000000000000000000000000000000'],
+        data: '0x0000000000000000000000000000000000000000000000000000000000000001',
+        key: 'lending.action_paused',
+        args: { vToken: VLISUSD, action: 0, pauseState: true },
+      },
+      {
+        logIndex: 140,
+        topics: ['0x35007a986bcd36d2f73fc7f1b73762e12eadb4406dd163194950fd3b5a6a827d', '0x000000000000000000000000689e0dab47ab16bcae87ec18491692bf621dc6ab', '0x0000000000000000000000000000000000000000000000000000000000000007'],
+        data: '0x0000000000000000000000000000000000000000000000000000000000000001',
+        key: 'lending.action_paused',
+        args: { vToken: VLISUSD, action: 7, pauseState: true },
+      },
+      {
+        logIndex: 142,
+        topics: ['0x9e0ad9cee10bdf36b7fbd38910c0bdff0f275ace679b45b922381c2723d676f8', '0x000000000000000000000000c5d3466aa484b040ee977073fcf337f2c00071c1'],
+        data: '0x0000000000000000000000000000000000000000000000000000000000000000',
+        key: 'lending.supply_cap_changed',
+        args: { vToken: VTRX, newSupplyCap: '0' },
+      },
+      {
+        logIndex: 143,
+        topics: ['0x9e0ad9cee10bdf36b7fbd38910c0bdff0f275ace679b45b922381c2723d676f8', '0x000000000000000000000000689e0dab47ab16bcae87ec18491692bf621dc6ab'],
+        data: '0x0000000000000000000000000000000000000000000000000000000000000000',
+        key: 'lending.supply_cap_changed',
+        args: { vToken: VLISUSD, newSupplyCap: '0' },
+      },
+      {
+        logIndex: 148,
+        topics: ['0x0d1a615379dc62cec7bc63b7e313a07ed659918f4ad3720b3af8041b305146f2', '0x0000000000000000000000000000000000000000000000000000000000000000', '0x000000000000000000000000689e0dab47ab16bcae87ec18491692bf621dc6ab'],
+        data: '0x00000000000000000000000000000000000000000000000006f05b59d3b200000000000000000000000000000000000000000000000000000000000000000000',
+        key: 'lending.collateral_factor_set',
+        args: { poolId: '0', vToken: VLISUSD, oldCollateralFactorMantissa: '500000000000000000', newCollateralFactorMantissa: '0' },
+      },
+    ];
+    expect(receiptLogs).toHaveLength(9);
+    for (const log of receiptLogs) {
+      const d = decodeWatchedLog({ topics: log.topics, data: log.data });
+      expect(d, `log ${log.logIndex}`).not.toBeNull();
+      expect(d!.event.key, `log ${log.logIndex}`).toBe(log.key);
+      expect(d!.args, `log ${log.logIndex}`).toEqual(log.args);
+      expect(d!.initAnchor, `log ${log.logIndex}`).toBe(false);
+    }
   });
 
   it('registers the Maker auth, Chainlink aggregator and Curve ownership keys with the agreed category/severity', () => {
