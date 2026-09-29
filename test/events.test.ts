@@ -137,9 +137,9 @@ describe('@gliese/events registry', () => {
     }
   });
 
-  it('watches 284 unique topic0 signatures under 236 keys (265 / 221 with Aave V4, 239 / 195 after batch 2, 194 / 153 after batch 1, 116 / 96 with Vault V2, 88 / 78 on 2026-09-18, 57 / 54 before the vault governance family)', () => {
-    expect(TOPIC0S.length).toBe(284);
-    expect(new Set(EVENTS.map((e) => e.key)).size).toBe(236);
+  it('watches 305 unique topic0 signatures under 257 keys (304 / 256 with the council family, 296 / 248 with Easy Track, 284 / 236 with the Venus batch, 265 / 221 with Aave V4, 239 / 195 after batch 2, 194 / 153 after batch 1, 116 / 96 with Vault V2, 88 / 78 on 2026-09-18, 57 / 54 before the vault governance family)', () => {
+    expect(TOPIC0S.length).toBe(305);
+    expect(new Set(EVENTS.map((e) => e.key)).size).toBe(257);
     expect(new Set(EVENTS.map((e) => e.category)).size).toBe(9);
     // auth.file accounts for 3 extra topic0s, vault.pending_revoked for 3 and vault.params_set for 4.
     expect(byKey('auth.file').length).toBe(4);
@@ -761,6 +761,138 @@ describe('@gliese/events registry', () => {
       expect(d!.args, `log ${log.logIndex}`).toEqual(log.args);
       expect(d!.initAnchor, `log ${log.logIndex}`).toBe(false);
     }
+  });
+
+  // ---- 2026-09-29: Lido Easy Track (gap scan 27 Sep row 5) ----
+
+  it('registers the Lido Easy Track events with the agreed category / severity and byte-exact topic0s', () => {
+    // key: [category, severity, canonical signature]. Sources: lidofinance/easy-track master
+    // contracts/EasyTrack.sol, EVMScriptFactoriesRegistry.sol, MotionSettings.sol, EVMScriptExecutor.sol.
+    const want: Record<string, [string, string, string]> = {
+      'easytrack.factory_added': ['access', 'critical', 'EVMScriptFactoryAdded(address,bytes)'],
+      'easytrack.factory_removed': ['access', 'high', 'EVMScriptFactoryRemoved(address)'],
+      'easytrack.executor_changed': ['governance', 'critical', 'EVMScriptExecutorChanged(address)'],
+      'easytrack.easy_track_changed': ['governance', 'critical', 'EasyTrackChanged(address,address)'],
+      'easytrack.motion_created': ['governance', 'info', 'MotionCreated(uint256,address,address,bytes,bytes)'],
+      'easytrack.motion_objected': ['governance', 'info', 'MotionObjected(uint256,address,uint256,uint256,uint256)'],
+      'easytrack.motion_rejected': ['governance', 'info', 'MotionRejected(uint256)'],
+      'easytrack.motion_canceled': ['governance', 'info', 'MotionCanceled(uint256)'],
+      'easytrack.motion_enacted': ['governance', 'high', 'MotionEnacted(uint256)'],
+      'easytrack.motion_duration_changed': ['parameters', 'high', 'MotionDurationChanged(uint256)'],
+      'easytrack.motions_count_limit_changed': ['parameters', 'info', 'MotionsCountLimitChanged(uint256)'],
+      'easytrack.objections_threshold_changed': ['parameters', 'high', 'ObjectionsThresholdChanged(uint256)'],
+    };
+    expect(Object.keys(want)).toHaveLength(12);
+    for (const [key, [category, severity, signature]] of Object.entries(want)) {
+      const entries = byKey(key);
+      expect(entries.length, key).toBe(1);
+      const ev = entries[0]!;
+      expect(ev.category, key).toBe(category);
+      expect(ev.severity, key).toBe(severity);
+      expect(ev.topic0, key).toBe(keccak256(toBytes(signature)));
+      // Every Easy Track topic0 is new to the registry (no collision with an existing key).
+      expect(EVENTS_BY_TOPIC0.get(ev.topic0)?.map((e) => e.key), key).toEqual([key]);
+    }
+    // The source's leading underscores are kept, so describers read a._motionId / a._evmScriptFactory.
+    expect(firstByKey('easytrack.motion_created').abi.inputs.map((i) => i.name)).toEqual(['_motionId', '_creator', '_evmScriptFactory', '_evmScriptCallData', '_evmScript']);
+    expect(firstByKey('easytrack.factory_added').abi.inputs.map((i) => `${i.name}${i.indexed ? '*' : ''}`)).toEqual(['_evmScriptFactory*', '_permissions']);
+  });
+
+  it('round-trips EVMScriptFactoryAdded (permissions bytes) and MotionCreated with lowercased addresses', () => {
+    const added = firstByKey('easytrack.factory_added');
+    // permissions = target address ++ selector, as the registry stores them (24 bytes per entry).
+    const permissions = `${BOB.toLowerCase()}a1b2c3d4` as Hex;
+    const a = decodeWatchedLog(encodeLog(added.abi, { _evmScriptFactory: ALICE, _permissions: permissions }))!;
+    expect(a.event.key).toBe('easytrack.factory_added');
+    expect(a.event.severity).toBe('critical');
+    expect(a.args).toEqual({ _evmScriptFactory: ALICE.toLowerCase(), _permissions: permissions });
+    expect(a.initAnchor).toBe(false);
+
+    const created = firstByKey('easytrack.motion_created');
+    const c = decodeWatchedLog(encodeLog(created.abi, { _motionId: 342n, _creator: BOB, _evmScriptFactory: ALICE, _evmScriptCallData: '0x1234', _evmScript: '0x00000001' }))!;
+    expect(c.event.key).toBe('easytrack.motion_created');
+    expect(c.args).toEqual({ _motionId: '342', _creator: BOB.toLowerCase(), _evmScriptFactory: ALICE.toLowerCase(), _evmScriptCallData: '0x1234', _evmScript: '0x00000001' });
+
+    const enacted = firstByKey('easytrack.motion_enacted');
+    const e = decodeWatchedLog(encodeLog(enacted.abi, { _motionId: 342n }))!;
+    expect(e.event.severity).toBe('high');
+    expect(e.args).toEqual({ _motionId: '342' });
+  });
+
+  // ---- 2026-09-29: Arbitrum SecurityCouncilManager (gap scan 27 Sep row 7) ----
+
+  it('registers the Arbitrum Security Council manager events with the agreed category / severity and byte-exact topic0s', () => {
+    // Sources: ArbitrumFoundation/governance main src/security-council-mgmt/SecurityCouncilManager.sol,
+    // Common.sol (enum Cohort { FIRST, SECOND } -> uint8 in the canonical signature).
+    const want: Record<string, [string, string, string]> = {
+      'council.cohort_replaced': ['multisig', 'critical', 'CohortReplaced(address[],uint8)'],
+      'council.member_added': ['multisig', 'high', 'MemberAdded(address,uint8)'],
+      'council.member_removed': ['multisig', 'critical', 'MemberRemoved(address,uint8)'],
+      'council.member_replaced': ['multisig', 'critical', 'MemberReplaced(address,address,uint8)'],
+      'council.member_rotated': ['multisig', 'high', 'MemberRotated(address,address,uint8)'],
+      'council.security_council_added': ['access', 'critical', 'SecurityCouncilAdded(address,address,uint256)'],
+      'council.security_council_removed': ['access', 'critical', 'SecurityCouncilRemoved(address,address,uint256)'],
+      'council.route_builder_set': ['parameters', 'critical', 'UpgradeExecRouteBuilderSet(address)'],
+    };
+    expect(Object.keys(want)).toHaveLength(8);
+    for (const [key, [category, severity, signature]] of Object.entries(want)) {
+      const entries = byKey(key);
+      expect(entries.length, key).toBe(1);
+      const ev = entries[0]!;
+      expect(ev.category, key).toBe(category);
+      expect(ev.severity, key).toBe(severity);
+      expect(ev.topic0, key).toBe(keccak256(toBytes(signature)));
+      expect(EVENTS_BY_TOPIC0.get(ev.topic0)?.map((e) => e.key), key).toEqual([key]);
+    }
+    // cohort is indexed on add / remove / replaceCohort and in data on replace / rotate, as in the source.
+    expect(firstByKey('council.member_added').abi.inputs.find((i) => i.name === 'cohort')?.indexed).toBe(true);
+    expect(firstByKey('council.member_rotated').abi.inputs.find((i) => i.name === 'cohort')?.indexed ?? false).toBe(false);
+  });
+
+  it('decodes the real MemberRotated logs of the manager proxy on Arbitrum One (tx 0xa0d5…c700, block 232403691)', () => {
+    // arb1.arbitrum.io/rpc eth_getLogs on 0xD509…eDFC, 2026-09-29: three MemberRotated logs in one tx
+    // (logIndex 12 / 14 / 16) and one more at block 264457864 (tx 0x071a…b11e). First of the three:
+    const topic0 = '0xd472135fb76619bc8ce55016956e8ebc668347e5010fddcfdc76c13e23353c8c';
+    expect(firstByKey('council.member_rotated').topic0).toBe(topic0);
+    const d = decodeWatchedLog({
+      topics: [topic0, '0x000000000000000000000000a0683d725420e2f75415806352cd9c3fe10fa960', '0x0000000000000000000000005a09a94ee8198d3c474d723337aa58023810022c'],
+      data: '0x0000000000000000000000000000000000000000000000000000000000000001',
+    })!;
+    expect(d.event.key).toBe('council.member_rotated');
+    expect(d.event.severity).toBe('high');
+    expect(d.args).toEqual({ replacedAddress: '0xa0683d725420e2f75415806352cd9c3fe10fa960', newAddress: '0x5a09a94ee8198d3c474d723337aa58023810022c', cohort: 1 });
+    expect(d.initAnchor).toBe(false);
+    // CohortReplaced carries the whole cohort in data with the cohort index in topics.
+    const replaced = firstByKey('council.cohort_replaced');
+    const r = decodeWatchedLog(encodeLog(replaced.abi, { newCohort: [ALICE, BOB], cohort: 0 }))!;
+    expect(r.args).toEqual({ newCohort: [ALICE.toLowerCase(), BOB.toLowerCase()], cohort: 0 });
+  });
+
+  // ---- 2026-09-29: AaveOracle, the real AssetSourceUpdated log (gap scan 27 Sep row 6) ----
+
+  it('decodes the real AssetSourceUpdated log that moved WETH to the SVR feed on the Aave V3 Core oracle, and registers BaseCurrencySet', () => {
+    // mainnet.gateway.tenderly.co eth_getLogs on AaveOracle 0x5458…a0C2 (Ethereum), 2026-09-29: block 22803459
+    // (0x15bf403, 2025-06-28), tx 0x1da81a2a7a62f302b91971029480306ec569c16a901c405d5a858d5acba12248, logIndex 106;
+    // asset = WETH, source = 0x5424…215e, the Chainlink SVR feed governance.aave.com/t/25689 talks about.
+    const topic0 = '0x22c5b7b2d8561d39f7f210b6b326a1aa69f15311163082308ac4877db6339dc1';
+    expect(firstByKey('oracle.asset_source_updated').topic0).toBe(topic0);
+    const d = decodeWatchedLog({
+      topics: [topic0, '0x000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', '0x0000000000000000000000005424384b256154046e9667ddfaaa5e550145215e'],
+      data: '0x',
+    })!;
+    expect(d.event.key).toBe('oracle.asset_source_updated');
+    expect(d.event.severity).toBe('critical');
+    expect(d.args).toEqual({ asset: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', source: '0x5424384b256154046e9667ddfaaa5e550145215e' });
+    expect(d.initAnchor).toBe(false);
+    // BaseCurrencySet (constructor-only): info, both IAaveOracle params, no collision.
+    const base = firstByKey('oracle.base_currency_set');
+    expect(base.category).toBe('parameters');
+    expect(base.severity).toBe('info');
+    expect(base.topic0).toBe(keccak256(toBytes('BaseCurrencySet(address,uint256)')));
+    expect(EVENTS_BY_TOPIC0.get(base.topic0)?.map((e) => e.key)).toEqual(['oracle.base_currency_set']);
+    const b = decodeWatchedLog(encodeLog(base.abi, { baseCurrency: ZERO, baseCurrencyUnit: 100_000_000n }))!;
+    expect(b.args).toEqual({ baseCurrency: ZERO, baseCurrencyUnit: '100000000' });
+    expect(firstByKey('oracle.fallback_oracle_updated').topic0).toBe(keccak256(toBytes('FallbackOracleUpdated(address)')));
   });
 
   it('registers the Maker auth, Chainlink aggregator and Curve ownership keys with the agreed category/severity', () => {

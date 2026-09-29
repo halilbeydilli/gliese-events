@@ -3,6 +3,25 @@
 All notable changes to this package are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semver.
 
+## [0.3.0] - 2026-09-29
+
+Two governance surfaces that sit next to the timelocks and Safes we already read, plus one
+oracle event. Sources named per block in `src/registry.ts`; every topic0 is re-derived from
+the canonical signature in the tests, and one real log per family decodes byte-exactly.
+
+### Added
+
+- `easytrack.*` (12 keys): Lido Easy Track from `lidofinance/easy-track` (`EasyTrack.sol`,
+  `EVMScriptFactoriesRegistry.sol`, `MotionSettings.sol`, `EVMScriptExecutor.sol`): factory added /
+  removed, executor changed, motion created / objected / rejected / canceled / enacted, duration,
+  count limit and objections threshold changes.
+- `council.*` (8 keys): Arbitrum `SecurityCouncilManager` from `ArbitrumFoundation/governance`:
+  cohort replaced, member added / removed / replaced / rotated, security council added / removed,
+  route builder set. Verified against a real `MemberRotated` log on Arbitrum One.
+- `oracle.base_currency_set`: `BaseCurrencySet(address indexed baseCurrency, uint256 baseCurrencyUnit)`
+  from Aave's `IAaveOracle` (constructor-only, so it marks a new oracle deployment).
+- Registry is now 305 signatures under 257 keys.
+
 ## [0.2.0] - 2026-09-28
 
 Venus core pool (Diamond Comptroller) and ResilientOracle control events, read from

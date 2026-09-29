@@ -32,7 +32,9 @@ export interface WatchedEvent {
  * Adding an entry: pick a stable `<family>.<snake_case>` key, keep the description one line, add
  * the human phrasing in apps/notifier (DESCRIBERS), apps/publisher (PHRASERS, digest KEY_*) and
  * apps/web/lib/describe.ts, and bump the topic0 count asserted in test/events.test.ts
- * (284 unique signatures / 236 keys since the Venus Diamond + ResilientOracle batch on 2026-09-28;
+ * (305 unique signatures / 257 keys since the Lido Easy Track + Arbitrum Security Council manager
+ * families and AaveOracle BaseCurrencySet on 2026-09-29; 284 / 236 since the Venus Diamond +
+ * ResilientOracle batch on 2026-09-28;
  * 265 / 221 since Aave V4 on 2026-09-26; 239 / 195 after coverage batch 2 on 2026-09-23; 194 / 153
  * after coverage batch 1 on 2026-09-22; 116 / 96 with Morpho Vault V2 earlier the same day; 88 / 78
  * on 2026-09-18; 57 / 54 before the vault governance family).
@@ -973,6 +975,17 @@ const SPECS: readonly Spec[] = [
     'critical',
     'An Aave-style oracle changed its fallback oracle (FallbackOracleUpdated).',
     'event FallbackOracleUpdated(address indexed fallbackOracle)',
+  ],
+  // 2026-09-29: the third event of IAaveOracle.sol (aave-dao/aave-v3-origin main). AaveOracle only
+  // emits it from its constructor (`_setBaseCurrency`), so a live log means a new oracle was
+  // deployed, not that an existing one changed; info, and it names the oracle's quote currency
+  // (the zero address + 1e8 = USD on every Aave V3 market we seed).
+  [
+    'oracle.base_currency_set',
+    'parameters',
+    'info',
+    'An Aave-style oracle set its base currency and unit at deployment (BaseCurrencySet).',
+    'event BaseCurrencySet(address indexed baseCurrency, uint256 baseCurrencyUnit)',
   ],
 
   // ---- lending: Aave V3 PoolConfigurator (2026-09-22) ----------------------------------------------
@@ -2000,6 +2013,168 @@ const SPECS: readonly Spec[] = [
     'info',
     'A role on an OpenZeppelin AccessManager was given a label (RoleLabel).',
     'event RoleLabel(uint64 indexed roleId, string label)',
+  ],
+
+  // ---- easytrack: Lido Easy Track (2026-09-29, GAP-SCAN-2026-09-27 row 5) --------------------------
+  // Sources read on the day: lidofinance/easy-track master `contracts/EasyTrack.sol` (motions +
+  // EVMScriptExecutorChanged), `contracts/EVMScriptFactoriesRegistry.sol` (factory add / remove),
+  // `contracts/MotionSettings.sol` (duration, count limit, objections threshold) and
+  // `contracts/EVMScriptExecutor.sol` (EasyTrackChanged; ScriptExecuted is not registered, every
+  // enactment already lands as motion_enacted). Param names keep the source's leading underscore.
+  // Easy Track is the DAO's delegated-power path: a factory is a permission (which contract, which
+  // selectors, from `_permissions`) that a trusted caller can exercise through a 72-hour optimistic
+  // motion; adding one (DG proposal #14 on 2026-09-25 added SetDepositsReserveTarget) widens what can
+  // change without a vote, so factory_added is critical. The EasyTrack contract holds the
+  // BUFFER_RESERVE_MANAGER_ROLE-style Aragon permissions through its EVMScriptExecutor, so swapping
+  // either contract re-routes every delegated power at once.
+  [
+    'easytrack.factory_added',
+    'access',
+    'critical',
+    'An EVM script factory was added to Lido Easy Track (EVMScriptFactoryAdded): a new delegated power that motions can exercise without a DAO vote.',
+    'event EVMScriptFactoryAdded(address indexed _evmScriptFactory, bytes _permissions)',
+  ],
+  [
+    'easytrack.factory_removed',
+    'access',
+    'high',
+    'An EVM script factory was removed from Lido Easy Track (EVMScriptFactoryRemoved).',
+    'event EVMScriptFactoryRemoved(address indexed _evmScriptFactory)',
+  ],
+  [
+    'easytrack.executor_changed',
+    'governance',
+    'critical',
+    'The EVMScriptExecutor of Lido Easy Track was changed (EVMScriptExecutorChanged): every enacted motion now runs through the new executor.',
+    'event EVMScriptExecutorChanged(address indexed _evmScriptExecutor)',
+  ],
+  [
+    'easytrack.easy_track_changed',
+    'governance',
+    'critical',
+    'The Easy Track allowed to drive a Lido EVMScriptExecutor was changed (EasyTrackChanged).',
+    'event EasyTrackChanged(address indexed _previousEasyTrack, address indexed _newEasyTrack)',
+  ],
+  [
+    'easytrack.motion_created',
+    'governance',
+    'info',
+    'A Lido Easy Track motion was created (MotionCreated); it enacts after the motion duration unless LDO holders object.',
+    'event MotionCreated(uint256 indexed _motionId, address _creator, address indexed _evmScriptFactory, bytes _evmScriptCallData, bytes _evmScript)',
+  ],
+  [
+    'easytrack.motion_objected',
+    'governance',
+    'info',
+    'An LDO holder objected to a Lido Easy Track motion (MotionObjected; weight and running objection total).',
+    'event MotionObjected(uint256 indexed _motionId, address indexed _objector, uint256 _weight, uint256 _newObjectionsAmount, uint256 _newObjectionsAmountPct)',
+  ],
+  [
+    'easytrack.motion_rejected',
+    'governance',
+    'info',
+    'A Lido Easy Track motion was rejected by objections (MotionRejected).',
+    'event MotionRejected(uint256 indexed _motionId)',
+  ],
+  [
+    'easytrack.motion_canceled',
+    'governance',
+    'info',
+    'A Lido Easy Track motion was cancelled by its creator or the CANCEL_ROLE (MotionCanceled).',
+    'event MotionCanceled(uint256 indexed _motionId)',
+  ],
+  [
+    'easytrack.motion_enacted',
+    'governance',
+    'high',
+    'A Lido Easy Track motion was enacted (MotionEnacted): its EVM script ran through the EVMScriptExecutor.',
+    'event MotionEnacted(uint256 indexed _motionId)',
+  ],
+  [
+    'easytrack.motion_duration_changed',
+    'parameters',
+    'high',
+    'The Lido Easy Track motion duration was changed (MotionDurationChanged; seconds the DAO has to object).',
+    'event MotionDurationChanged(uint256 _motionDuration)',
+  ],
+  [
+    'easytrack.motions_count_limit_changed',
+    'parameters',
+    'info',
+    'The limit of simultaneously active Lido Easy Track motions was changed (MotionsCountLimitChanged).',
+    'event MotionsCountLimitChanged(uint256 _newMotionsCountLimit)',
+  ],
+  [
+    'easytrack.objections_threshold_changed',
+    'parameters',
+    'high',
+    'The Lido Easy Track objections threshold was changed (ObjectionsThresholdChanged; basis points of LDO total supply).',
+    'event ObjectionsThresholdChanged(uint256 _newThreshold)',
+  ],
+
+  // ---- council: Arbitrum SecurityCouncilManager (2026-09-29, GAP-SCAN-2026-09-27 row 7) ------------
+  // Source read on the day: ArbitrumFoundation/governance main
+  // `src/security-council-mgmt/SecurityCouncilManager.sol` (events) + `Common.sol` (enum Cohort
+  // { FIRST, SECOND } = uint8 0 / 1). The manager on Arbitrum One (proxy 0xD509…eDFC) is the source
+  // of truth for the 12 Security Council signers; every change here is pushed to the three Safes
+  // (L1 emergency, Arb One emergency + non-emergency, Nova) through the L2 timelock, so a member event
+  // on the manager precedes the `safe.added_owner` / `safe.removed_owner` pair on each Safe by days.
+  // rotateMember (same member, new key) is what Reacher Report #002 (Arbitrum forum 31491) is about.
+  [
+    'council.cohort_replaced',
+    'multisig',
+    'critical',
+    'A whole Security Council cohort was replaced on the manager (CohortReplaced; the election outcome or an emergency swap).',
+    'event CohortReplaced(address[] newCohort, uint8 indexed cohort)',
+  ],
+  [
+    'council.member_added',
+    'multisig',
+    'high',
+    'A member was added to a Security Council cohort on the manager (MemberAdded).',
+    'event MemberAdded(address indexed newMember, uint8 indexed cohort)',
+  ],
+  [
+    'council.member_removed',
+    'multisig',
+    'critical',
+    'A member was removed from a Security Council cohort on the manager (MemberRemoved).',
+    'event MemberRemoved(address indexed member, uint8 indexed cohort)',
+  ],
+  [
+    'council.member_replaced',
+    'multisig',
+    'critical',
+    'A Security Council member was replaced by another on the manager (MemberReplaced).',
+    'event MemberReplaced(address indexed replacedMember, address indexed newMember, uint8 cohort)',
+  ],
+  [
+    'council.member_rotated',
+    'multisig',
+    'high',
+    'A Security Council member rotated to a new signing key on the manager (MemberRotated; same seat, new address).',
+    'event MemberRotated(address indexed replacedAddress, address indexed newAddress, uint8 cohort)',
+  ],
+  [
+    'council.security_council_added',
+    'access',
+    'critical',
+    'A Safe was added to the set the Security Council manager keeps in sync (SecurityCouncilAdded).',
+    'event SecurityCouncilAdded(address indexed securityCouncil, address indexed updateAction, uint256 securityCouncilsLength)',
+  ],
+  [
+    'council.security_council_removed',
+    'access',
+    'critical',
+    'A Safe was removed from the set the Security Council manager keeps in sync (SecurityCouncilRemoved).',
+    'event SecurityCouncilRemoved(address indexed securityCouncil, address indexed updateAction, uint256 securityCouncilsLength)',
+  ],
+  [
+    'council.route_builder_set',
+    'parameters',
+    'critical',
+    'The UpgradeExecRouteBuilder of the Security Council manager was changed (UpgradeExecRouteBuilderSet): it builds the timelock route every member update travels.',
+    'event UpgradeExecRouteBuilderSet(address indexed UpgradeExecRouteBuilder)',
   ],
 ];
 
