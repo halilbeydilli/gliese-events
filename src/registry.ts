@@ -32,8 +32,11 @@ export interface WatchedEvent {
  * Adding an entry: pick a stable `<family>.<snake_case>` key, keep the description one line, add
  * the human phrasing in apps/notifier (DESCRIBERS), apps/publisher (PHRASERS, digest KEY_*) and
  * apps/web/lib/describe.ts, and bump the topic0 count asserted in test/events.test.ts
- * (305 unique signatures / 257 keys since the Lido Easy Track + Arbitrum Security Council manager
- * families and AaveOracle BaseCurrencySet on 2026-09-29; 284 / 236 since the Venus Diamond +
+ * (330 unique signatures / 279 keys since Aave Governance V3 core + PayloadsController on 2026-09-29;
+ * 317 / 268 with the OZ Governor late-quorum / quorum / timelock keys and 313 / 264 with the Venus
+ * GovernorBravo typed ProposalCreated + settings keys the same day; 305 / 257 since the Lido Easy
+ * Track + Arbitrum Security Council manager
+ * families and AaveOracle BaseCurrencySet the same day; 284 / 236 since the Venus Diamond +
  * ResilientOracle batch on 2026-09-28;
  * 265 / 221 since Aave V4 on 2026-09-26; 239 / 195 after coverage batch 2 on 2026-09-23; 194 / 153
  * after coverage batch 1 on 2026-09-22; 116 / 96 with Morpho Vault V2 earlier the same day; 88 / 78
@@ -378,26 +381,43 @@ const SPECS: readonly Spec[] = [
   ],
 
   // ---- governance ---------------------------------------------------------
+  // Two ProposalCreated layouts under one key (2026-09-29, GAP-SCAN-2026-09-29 row 1): the OpenZeppelin
+  // IGovernor / Compound GovernorBravo nine-arg form, and Venus GovernorBravoDelegate's with the trailing
+  // `proposalType` (VenusProtocol/governance-contracts develop contracts/Governance/GovernorBravoInterfaces.sol,
+  // `GovernorBravoEvents`; `uint` = uint256; enum ProposalType { NORMAL, FASTTRACK, CRITICAL } = uint8 0 / 1 / 2;
+  // the source names the id `id` and the window `startBlock` / `endBlock`, kept as written). Different
+  // param types, different topic0: a declared overload key in the test, like `lending.supply_cap_changed`.
+  // VIP-664's creation (BNB block 124,657,988) is the real log the test decodes. Third layout (row 3): Aave
+  // Governance V3 core (bgd-labs/aave-governance-v3 main src/interfaces/IGovernanceCore.sol), where the
+  // payloads live elsewhere (`payloads.created`) and the event carries the creator, the access level
+  // (PayloadsControllerUtils.AccessControl: 0 Level_null, 1 Level_1, 2 Level_2; uint8) and the IPFS hash.
   [
     'governor.proposal_created',
     'governance',
     'info',
     'A governance proposal was created.',
     'event ProposalCreated(uint256 proposalId, address proposer, address[] targets, uint256[] values, string[] signatures, bytes[] calldatas, uint256 voteStart, uint256 voteEnd, string description)',
+    'event ProposalCreated(uint256 id, address proposer, address[] targets, uint256[] values, string[] signatures, bytes[] calldatas, uint256 startBlock, uint256 endBlock, string description, uint8 proposalType)',
+    'event ProposalCreated(uint256 indexed proposalId, address indexed creator, uint8 indexed accessLevel, bytes32 ipfsHash)',
   ],
+  // OZ / Bravo `(proposalId, etaSeconds)` and Aave Governance V3's `(proposalId, votesFor, votesAgainst)`
+  // (2026-09-29): there the eta belongs to each payload, see `payloads.queued`. Different types, overload key.
   [
     'governor.proposal_queued',
     'governance',
     'info',
     'A governance proposal was queued for execution.',
     'event ProposalQueued(uint256 proposalId, uint256 etaSeconds)',
+    'event ProposalQueued(uint256 indexed proposalId, uint128 votesFor, uint128 votesAgainst)',
   ],
+  // Aave Governance V3 indexes the id: same topic0, second layout (2026-09-29).
   [
     'governor.proposal_executed',
     'governance',
     'info',
     'A governance proposal was executed.',
     'event ProposalExecuted(uint256 proposalId)',
+    'event ProposalExecuted(uint256 indexed proposalId)',
   ],
   [
     'governor.proposal_canceled',
@@ -405,6 +425,7 @@ const SPECS: readonly Spec[] = [
     'info',
     'A governance proposal was canceled.',
     'event ProposalCanceled(uint256 proposalId)',
+    'event ProposalCanceled(uint256 indexed proposalId)',
   ],
 
   // ---- token_admin (Circle FiatToken style) ------------------------------
@@ -2175,6 +2196,192 @@ const SPECS: readonly Spec[] = [
     'critical',
     'The UpgradeExecRouteBuilder of the Security Council manager was changed (UpgradeExecRouteBuilderSet): it builds the timelock route every member update travels.',
     'event UpgradeExecRouteBuilderSet(address indexed UpgradeExecRouteBuilder)',
+  ],
+
+  // ---- governor: GovernorBravo settings and Venus guardian / configs (2026-09-29, GAP-SCAN-2026-09-29 row 1)
+  // Source read on the day: VenusProtocol/governance-contracts develop
+  // contracts/Governance/GovernorBravoInterfaces.sol (`GovernorBravoEvents`, `uint` = uint256), emitted by
+  // GovernorBravoDelegate.sol. VotingDelaySet / VotingPeriodSet / ProposalThresholdSet are byte-identical in
+  // compound-finance GovernorBravoDelegate and OpenZeppelin GovernorSettings (governance/extensions/
+  // GovernorSettings.sol), so one entry each serves all three governors. Venus' NewAdmin / NewPendingAdmin /
+  // NewImplementation are already `ownable.new_admin` / `ownable.new_pending_admin` / `proxy.new_implementation`;
+  // ProposalQueued / ProposalExecuted / ProposalCanceled share the OZ topic0s under `governor.*` above.
+  [
+    'governor.voting_delay_set',
+    'governance',
+    'high',
+    'The voting delay of a governor was changed (VotingDelaySet; OpenZeppelin GovernorSettings, Compound and Venus GovernorBravo).',
+    'event VotingDelaySet(uint256 oldVotingDelay, uint256 newVotingDelay)',
+  ],
+  [
+    'governor.voting_period_set',
+    'governance',
+    'high',
+    'The voting period of a governor was changed (VotingPeriodSet; OpenZeppelin GovernorSettings, Compound and Venus GovernorBravo).',
+    'event VotingPeriodSet(uint256 oldVotingPeriod, uint256 newVotingPeriod)',
+  ],
+  [
+    'governor.proposal_threshold_set',
+    'governance',
+    'high',
+    'The proposal threshold (votes needed to propose) of a governor was changed (ProposalThresholdSet; OpenZeppelin GovernorSettings, Compound and Venus GovernorBravo).',
+    'event ProposalThresholdSet(uint256 oldProposalThreshold, uint256 newProposalThreshold)',
+  ],
+  [
+    'governor.guardian_set',
+    'access',
+    'critical',
+    'The guardian of a Venus GovernorBravo, the address that may cancel any proposal, was changed (NewGuardian).',
+    'event NewGuardian(address oldGuardian, address newGuardian)',
+  ],
+  [
+    'governor.proposal_max_operations_updated',
+    'governance',
+    'info',
+    'The maximum number of actions per proposal of a Venus GovernorBravo was changed (ProposalMaxOperationsUpdated).',
+    'event ProposalMaxOperationsUpdated(uint256 oldMaxOperations, uint256 newMaxOperations)',
+  ],
+  [
+    'governor.validation_params_set',
+    'governance',
+    'high',
+    'The allowed voting-period and voting-delay ranges of a Venus GovernorBravo were changed (SetValidationParams).',
+    'event SetValidationParams(uint256 oldMinVotingPeriod, uint256 newMinVotingPeriod, uint256 oldmaxVotingPeriod, uint256 newmaxVotingPeriod, uint256 oldminVotingDelay, uint256 newminVotingDelay, uint256 oldmaxVotingDelay, uint256 newmaxVotingDelay)',
+  ],
+  [
+    'governor.proposal_configs_set',
+    'governance',
+    'high',
+    'The proposal config of one Venus proposal type (voting period, voting delay, threshold) was set (SetProposalConfigs; emitted once per type, NORMAL, FASTTRACK, CRITICAL in that order).',
+    'event SetProposalConfigs(uint256 votingPeriod, uint256 votingDelay, uint256 proposalThreshold)',
+  ],
+
+  // ---- governor: OpenZeppelin Governor extensions (2026-09-29, GAP-SCAN-2026-09-29 row 2) -----------
+  // Source read on the day: OpenZeppelin/openzeppelin-contracts master governance/extensions/
+  // GovernorPreventLateQuorum.sol (ProposalExtended, LateQuorumVoteExtensionSet),
+  // GovernorVotesQuorumFraction.sol (QuorumNumeratorUpdated), GovernorTimelockControl.sol (TimelockChange);
+  // GovernorSettings' three setters are the shared entries above. Compound Governor 0x309a…c8c0 extended
+  // proposal 610 at block 26,076,170 (the real log the test decodes): `extendedDeadline` is in the governor's
+  // clock units (block number for Compound, timestamp for timestamp-clock governors), so the "vote ends" a
+  // reader keeps must come from proposalDeadline() after this event, not from the stored voteEnd.
+  [
+    'governor.proposal_extended',
+    'governance',
+    'info',
+    'The voting deadline of a proposal was pushed out because quorum was reached late (OpenZeppelin GovernorPreventLateQuorum ProposalExtended; the new deadline is in the governor clock, blocks or seconds).',
+    'event ProposalExtended(uint256 indexed proposalId, uint64 extendedDeadline)',
+  ],
+  [
+    'governor.late_quorum_extension_set',
+    'governance',
+    'high',
+    'The late-quorum vote extension of an OpenZeppelin governor was changed (LateQuorumVoteExtensionSet; governor clock units).',
+    'event LateQuorumVoteExtensionSet(uint64 oldVoteExtension, uint64 newVoteExtension)',
+  ],
+  [
+    'governor.quorum_numerator_updated',
+    'governance',
+    'high',
+    'The quorum fraction of an OpenZeppelin governor was changed (GovernorVotesQuorumFraction QuorumNumeratorUpdated; numerator over quorumDenominator(), 100 by default).',
+    'event QuorumNumeratorUpdated(uint256 oldQuorumNumerator, uint256 newQuorumNumerator)',
+  ],
+  [
+    'governor.timelock_changed',
+    'governance',
+    'critical',
+    'The timelock an OpenZeppelin governor executes through was changed (GovernorTimelockControl TimelockChange).',
+    'event TimelockChange(address oldTimelock, address newTimelock)',
+  ],
+
+  // ---- Aave Governance V3 core + PayloadsController (2026-09-29, GAP-SCAN-2026-09-29 row 3) ----------
+  // Sources read on the day: bgd-labs/aave-governance-v3 main src/interfaces/IGovernanceCore.sol (emitted by
+  // src/contracts/GovernanceCore.sol), src/contracts/payloads/interfaces/IPayloadsControllerCore.sol (emitted
+  // by PayloadsControllerCore.sol), src/contracts/payloads/PayloadsControllerUtils.sol (enum AccessControl
+  // { Level_null, Level_1, Level_2 } = uint8 0 / 1 / 2) and bgd-labs/aave-delivery-infrastructure main
+  // src/contracts/old-oz/interfaces/IWithGuardian.sol (GuardianUpdated, inherited by both through
+  // OwnableWithGuardian). ProposalCreated / Queued / Executed / Canceled join the `governor.*` keys above.
+  // Flow: payloads.created (per chain, before the proposal) -> governor.proposal_created -> governor.voting_activated
+  // -> vote on the voting machine -> governor.proposal_queued (results bridged) -> governor.proposal_executed
+  // (PayloadSent per payload) -> payloads.queued on each PayloadsController -> executor delay -> payloads.executed.
+  // Not registered: PayloadSent, VoteForwarded, RepresentativeUpdated, CancellationFee*, GasLimitUpdated,
+  // PayloadExecutionMessageReceived (per-voter or bridge-plumbing noise). A `MessageOriginatorSet` event does not
+  // exist in the source (MESSAGE_ORIGINATOR is an immutable of IPayloadsController).
+  [
+    'governor.voting_activated',
+    'governance',
+    'info',
+    'Voting on an Aave Governance V3 proposal was activated: the snapshot block hash is fixed and the vote runs for votingDuration seconds on the voting machine (VotingActivated).',
+    'event VotingActivated(uint256 indexed proposalId, bytes32 indexed snapshotBlockHash, uint24 votingDuration)',
+  ],
+  [
+    'governor.proposal_failed',
+    'governance',
+    'info',
+    'An Aave Governance V3 proposal failed its vote once the results were bridged back (ProposalFailed; votes in 1e18 voting power).',
+    'event ProposalFailed(uint256 indexed proposalId, uint128 votesFor, uint128 votesAgainst)',
+  ],
+  [
+    'governor.voting_config_updated',
+    'governance',
+    'critical',
+    'The voting config of one Aave Governance V3 access level was changed (VotingConfigUpdated: voting duration, cooldown before voting, yes threshold, yes/no differential, minimum proposition power).',
+    'event VotingConfigUpdated(uint8 indexed accessLevel, uint24 votingDuration, uint24 coolDownBeforeVotingStart, uint256 yesThreshold, uint256 yesNoDifferential, uint256 minPropositionPower)',
+  ],
+  [
+    'governor.power_strategy_updated',
+    'governance',
+    'critical',
+    'The power strategy (how voting and proposition power are counted) of Aave Governance V3 was changed (PowerStrategyUpdated).',
+    'event PowerStrategyUpdated(address indexed newPowerStrategy)',
+  ],
+  [
+    'governor.voting_portal_updated',
+    'governance',
+    'critical',
+    'A voting portal (the bridge to one voting machine) was approved or removed on Aave Governance V3 (VotingPortalUpdated).',
+    'event VotingPortalUpdated(address indexed votingPortal, bool indexed approved)',
+  ],
+  [
+    'ownable.guardian_updated',
+    'ownership',
+    'critical',
+    'The guardian of a BGD OwnableWithGuardian contract (Aave Governance V3 core, PayloadsController, CrossChainController) was changed (GuardianUpdated).',
+    'event GuardianUpdated(address oldGuardian, address newGuardian)',
+  ],
+  [
+    'payloads.created',
+    'governance',
+    'info',
+    'A payload (the list of executor actions a proposal will run on this chain) was registered on an Aave Governance V3 PayloadsController (PayloadCreated).',
+    'event PayloadCreated(uint40 indexed payloadId, address indexed creator, (address target, bool withDelegateCall, uint8 accessLevel, uint256 value, string signature, bytes callData)[] actions, uint8 indexed maximumAccessLevelRequired)',
+  ],
+  [
+    'payloads.queued',
+    'timelock',
+    'high',
+    'A payload was queued on an Aave Governance V3 PayloadsController after its proposal passed; it becomes executable after the executor delay (PayloadQueued).',
+    'event PayloadQueued(uint40 payloadId)',
+  ],
+  [
+    'payloads.executed',
+    'timelock',
+    'info',
+    'A queued payload was executed by an Aave Governance V3 PayloadsController (PayloadExecuted).',
+    'event PayloadExecuted(uint40 payloadId)',
+  ],
+  [
+    'payloads.cancelled',
+    'timelock',
+    'info',
+    'A payload was cancelled on an Aave Governance V3 PayloadsController by the guardian (PayloadCancelled).',
+    'event PayloadCancelled(uint40 payloadId)',
+  ],
+  [
+    'payloads.executor_set',
+    'access',
+    'critical',
+    'The executor and delay of one access level of an Aave Governance V3 PayloadsController were set (ExecutorSet).',
+    'event ExecutorSet(uint8 indexed accessLevel, address indexed executor, uint40 delay)',
   ],
 ];
 

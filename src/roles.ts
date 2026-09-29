@@ -182,6 +182,22 @@ const HASHED_ROLE_NAMES: readonly string[] = [
   'RISK_ADMIN_ROLE',
   'BRIDGE_ROLE',
 
+  // --- Ethena sUSDe / EthenaMinting (2026-09-29, GAP-SCAN-2026-09-29 row 6) --------------------------
+  // Read from the verified deployed sources on Sourcify (full match): sUSDe 0x9D39…3497 = StakedUSDeV2,
+  // `contracts/StakedUSDe.sol` (REWARDER_ROLE, BLACKLIST_MANAGER_ROLE, SOFT_RESTRICTED_STAKER_ROLE,
+  // FULL_RESTRICTED_STAKER_ROLE) and EthenaMinting 0xe349…62D3 `contracts/EthenaMinting.sol` (MINTER_ROLE
+  // above, REDEEMER_ROLE, COLLATERAL_MANAGER_ROLE, GATEKEEPER_ROLE); the same constants are in
+  // ethena-labs/code4arena-contest protocols/USDe/contracts. USDe.sol itself has a single `minter` address
+  // (Ownable2Step), no roles. FULL_RESTRICTED_STAKER_ROLE (0x0a4af4bc…c3bd) is the freeze the 02:00 UTC
+  // sUSDe role grant carried unnamed.
+  'REWARDER_ROLE',
+  'BLACKLIST_MANAGER_ROLE',
+  'SOFT_RESTRICTED_STAKER_ROLE',
+  'FULL_RESTRICTED_STAKER_ROLE',
+  'REDEEMER_ROLE',
+  'COLLATERAL_MANAGER_ROLE',
+  'GATEKEEPER_ROLE',
+
   // --- Bare words: contracts that hash the word without the `_ROLE` suffix --------------------
   'ADMIN',
   'OPERATOR',

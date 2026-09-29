@@ -1,6 +1,6 @@
 {
   "name": "@gliese-watch/events",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Event registry for EVM protocol control changes: proxy upgrades, admin keys, Safe signers, timelocks, roles and vault governance, plus a role-name registry",
   "license": "MIT",
   "author": "Halil Beydilli",

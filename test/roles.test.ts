@@ -12,6 +12,15 @@ describe('roleNameOf', () => {
     expect(roleNameOf('0x33969636f1fbf3d7d062d4de4a08e7bd3c46606ec28b3a4398d2665be559b921')).toBe('BUFFER_RESERVE_MANAGER_ROLE');
   });
 
+  it('names the Ethena sUSDe restriction and minting roles (2026-09-29)', () => {
+    // The 02:00 UTC 2026-09-29 sUSDe access.role_granted (tx 0x14540e44…63f3) carried this hash unnamed:
+    // StakedUSDe.FULL_RESTRICTED_STAKER_ROLE, a full freeze of one holder.
+    expect(roleNameOf('0x0a4af4bcc1942295207d9f047442ebdae6170a6e324850f758b14cf99b65c3bd')).toBe('FULL_RESTRICTED_STAKER_ROLE');
+    for (const name of ['SOFT_RESTRICTED_STAKER_ROLE', 'REWARDER_ROLE', 'BLACKLIST_MANAGER_ROLE', 'REDEEMER_ROLE', 'COLLATERAL_MANAGER_ROLE', 'GATEKEEPER_ROLE', 'MINTER_ROLE']) {
+      expect(roleNameOf(keccak256(toBytes(name))), name).toBe(name);
+    }
+  });
+
   it('maps DEFAULT_ADMIN_ROLE, which is 32 zero bytes rather than a hash', () => {
     expect(roleNameOf(ZERO)).toBe('DEFAULT_ADMIN_ROLE');
     // A decoder that dropped the leading zeros still resolves.
@@ -97,6 +106,12 @@ describe('ROLE_NAME_BY_HASH', () => {
       'FLASH_BORROWER',
       'BRIDGE',
       'ASSET_LISTING_ADMIN',
+      // Ethena sUSDe / EthenaMinting (2026-09-29)
+      'FULL_RESTRICTED_STAKER_ROLE',
+      'SOFT_RESTRICTED_STAKER_ROLE',
+      'BLACKLIST_MANAGER_ROLE',
+      'COLLATERAL_MANAGER_ROLE',
+      'GATEKEEPER_ROLE',
     ]) {
       expect(names).toContain(name);
     }

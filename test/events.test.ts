@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { encodeAbiParameters, encodeEventTopics, keccak256, toBytes, type AbiEvent, type Hex } from 'viem';
+import { decodeEventLog, encodeAbiParameters, encodeEventTopics, keccak256, toBytes, type AbiEvent, type Hex } from 'viem';
 import {
   EVENTS,
   EVENTS_BY_TOPIC0,
@@ -88,6 +89,10 @@ describe('@gliese/events registry', () => {
     'lending.supply_cap_changed',
     'lending.collateral_factor_set',
     'lending.liquidation_incentive_set',
+    // Governors (2026-09-29): the OZ / Bravo ProposalCreated plus Venus' ten-arg form with `proposalType` and
+    // Aave Governance V3's four-arg form; ProposalQueued with an eta (OZ / Bravo) or the vote tallies (Aave V3)
+    'governor.proposal_created',
+    'governor.proposal_queued',
   ]);
 
   it('entries sharing a key share a topic0 (except declared overload keys), and each (key, layout) is unique', () => {
@@ -137,9 +142,9 @@ describe('@gliese/events registry', () => {
     }
   });
 
-  it('watches 305 unique topic0 signatures under 257 keys (304 / 256 with the council family, 296 / 248 with Easy Track, 284 / 236 with the Venus batch, 265 / 221 with Aave V4, 239 / 195 after batch 2, 194 / 153 after batch 1, 116 / 96 with Vault V2, 88 / 78 on 2026-09-18, 57 / 54 before the vault governance family)', () => {
-    expect(TOPIC0S.length).toBe(305);
-    expect(new Set(EVENTS.map((e) => e.key)).size).toBe(257);
+  it('watches 330 unique topic0 signatures under 279 keys (317 / 268 with the OZ Governor keys, 313 / 264 with the Venus governor keys, 305 / 257 with Easy Track + council + BaseCurrencySet, 284 / 236 with the Venus batch, 265 / 221 with Aave V4, 239 / 195 after batch 2, 194 / 153 after batch 1, 116 / 96 with Vault V2, 88 / 78 on 2026-09-18, 57 / 54 before the vault governance family)', () => {
+    expect(TOPIC0S.length).toBe(330);
+    expect(new Set(EVENTS.map((e) => e.key)).size).toBe(279);
     expect(new Set(EVENTS.map((e) => e.category)).size).toBe(9);
     // auth.file accounts for 3 extra topic0s, vault.pending_revoked for 3 and vault.params_set for 4.
     expect(byKey('auth.file').length).toBe(4);
@@ -893,6 +898,281 @@ describe('@gliese/events registry', () => {
     const b = decodeWatchedLog(encodeLog(base.abi, { baseCurrency: ZERO, baseCurrencyUnit: 100_000_000n }))!;
     expect(b.args).toEqual({ baseCurrency: ZERO, baseCurrencyUnit: '100000000' });
     expect(firstByKey('oracle.fallback_oracle_updated').topic0).toBe(keccak256(toBytes('FallbackOracleUpdated(address)')));
+  });
+
+  // ---- 2026-09-29: Venus GovernorBravo typed ProposalCreated + settings (gap scan 29 Sep row 1) ----
+
+  it('registers the Venus GovernorBravo layout of ProposalCreated and the Bravo / OZ settings keys with byte-exact topic0s', () => {
+    // Sources: VenusProtocol/governance-contracts develop contracts/Governance/GovernorBravoInterfaces.sol
+    // (GovernorBravoEvents, `uint` = uint256); OpenZeppelin governance/extensions/GovernorSettings.sol for the
+    // three shared setters (same canonical signature, same topic0, one entry).
+    const created = byKey('governor.proposal_created');
+    expect(created).toHaveLength(3); // OZ / Bravo, Venus, Aave Governance V3 (tested below)
+    const oz = created.find((e) => e.abi.inputs.length === 9)!;
+    const venus = created.find((e) => e.abi.inputs.length === 10)!;
+    expect(oz.topic0).toBe(keccak256(toBytes('ProposalCreated(uint256,address,address[],uint256[],string[],bytes[],uint256,uint256,string)')));
+    expect(venus.topic0).toBe(keccak256(toBytes('ProposalCreated(uint256,address,address[],uint256[],string[],bytes[],uint256,uint256,string,uint8)')));
+    // The topic0 the gap scan read off VIP-664's receipt.
+    expect(venus.topic0).toBe('0xc8df7ff219f3c0358e14500814d8b62b443a4bebf3a596baa60b9295b1cf1bde');
+    expect(venus.abi.inputs.map((i) => i.name)).toEqual(['id', 'proposer', 'targets', 'values', 'signatures', 'calldatas', 'startBlock', 'endBlock', 'description', 'proposalType']);
+    expect(venus.abi.inputs.every((i) => !i.indexed)).toBe(true);
+    expect(venus.severity).toBe('info');
+
+    const want: Record<string, [string, string, string]> = {
+      'governor.voting_delay_set': ['governance', 'high', 'VotingDelaySet(uint256,uint256)'],
+      'governor.voting_period_set': ['governance', 'high', 'VotingPeriodSet(uint256,uint256)'],
+      'governor.proposal_threshold_set': ['governance', 'high', 'ProposalThresholdSet(uint256,uint256)'],
+      'governor.guardian_set': ['access', 'critical', 'NewGuardian(address,address)'],
+      'governor.proposal_max_operations_updated': ['governance', 'info', 'ProposalMaxOperationsUpdated(uint256,uint256)'],
+      'governor.validation_params_set': ['governance', 'high', 'SetValidationParams(uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256)'],
+      'governor.proposal_configs_set': ['governance', 'high', 'SetProposalConfigs(uint256,uint256,uint256)'],
+    };
+    expect(Object.keys(want)).toHaveLength(7);
+    for (const [key, [category, severity, signature]] of Object.entries(want)) {
+      const entries = byKey(key);
+      expect(entries.length, key).toBe(1);
+      const ev = entries[0]!;
+      expect(ev.category, key).toBe(category);
+      expect(ev.severity, key).toBe(severity);
+      expect(ev.topic0, key).toBe(keccak256(toBytes(signature)));
+      expect(EVENTS_BY_TOPIC0.get(ev.topic0)?.map((e) => e.key), key).toEqual([key]);
+    }
+    // Venus' ProposalQueued / Executed / Canceled and NewAdmin / NewPendingAdmin restate existing entries.
+    expect(firstByKey('governor.proposal_queued').topic0).toBe(keccak256(toBytes('ProposalQueued(uint256,uint256)')));
+    expect(firstByKey('governor.proposal_executed').topic0).toBe(keccak256(toBytes('ProposalExecuted(uint256)')));
+    expect(firstByKey('governor.proposal_canceled').topic0).toBe(keccak256(toBytes('ProposalCanceled(uint256)')));
+    expect(firstByKey('ownable.new_admin').topic0).toBe(keccak256(toBytes('NewAdmin(address,address)')));
+  });
+
+  it('decodes the real VIP-664 ProposalCreated log on the Venus governor (BNB block 124657988) byte-exactly', () => {
+    // bsc-dataseed.bnbchain.org eth_getTransactionReceipt of api.venus.io's createdTxHash for proposal 664,
+    // read 2026-09-29: tx 0x0a5506be6a303b9558b72e3ac854bbfd413a55468946eabb379e77dfcfe35648, logIndex 173 on
+    // 0x2d56…c75a. 15,712 data bytes, so the log lives in a fixture file.
+    const fixture = JSON.parse(readFileSync(new URL('./fixtures/venus-vip-664-proposal-created.json', import.meta.url), 'utf8')) as {
+      address: string;
+      blockNumber: number;
+      logIndex: number;
+      topics: Hex[];
+      data: Hex;
+    };
+    expect(fixture.address).toBe('0x2d56dc077072b53571b8252008c60e945108c75a');
+    expect(fixture.blockNumber).toBe(124657988);
+    expect(fixture.topics).toEqual(['0xc8df7ff219f3c0358e14500814d8b62b443a4bebf3a596baa60b9295b1cf1bde']);
+    expect((fixture.data.length - 2) / 2).toBe(15712);
+
+    const d = decodeWatchedLog({ topics: fixture.topics, data: fixture.data })!;
+    expect(d).not.toBeNull();
+    expect(d.event.key).toBe('governor.proposal_created');
+    expect(d.event.abi.inputs).toHaveLength(10);
+    expect(d.initAnchor).toBe(false);
+    const a = d.args as Record<string, unknown>;
+    expect(a['id']).toBe('664');
+    expect(a['proposer']).toBe('0x34221485302f6f2029660a000908b5fcabb9bc6e');
+    expect(a['startBlock']).toBe('124657989');
+    expect(a['endBlock']).toBe('124850373');
+    expect(a['proposalType']).toBe(0); // NORMAL
+    const targets = a['targets'] as string[];
+    const signatures = a['signatures'] as string[];
+    const values = a['values'] as string[];
+    const calldatas = a['calldatas'] as string[];
+    expect(targets).toHaveLength(32);
+    expect(values).toHaveLength(32);
+    expect(signatures).toHaveLength(32);
+    expect(calldatas).toHaveLength(32);
+    expect(values.every((v) => v === '0')).toBe(true);
+    expect(targets[0]).toBe('0xf322942f644a996a617bd29c16bd7d231d9f35e9'); // VTreasury
+    expect(signatures[0]).toBe('withdrawTreasuryBEP20(address,uint256,address)');
+    expect(signatures[25]).toBe('createPool(string)');
+    expect(signatures[27]).toBe('setCollateralFactor(uint96,address,uint256,uint256)');
+    expect(targets.slice(25).every((t) => t === '0xfd36e2c2a6789db23113685031d7f16329158384')).toBe(true); // Comptroller
+    expect((calldatas[26]!.length - 2) / 2).toBe(256);
+    expect(JSON.parse(a['description'] as string).title).toBe('VIP-664 [BNB Chain] ETH E-Mode, Treasury Hub migration and U FRV cap');
+
+    // Byte-exact: re-encoding the raw viem decode reproduces the 15,712 data bytes.
+    const raw = decodeEventLog({ abi: [d.event.abi], topics: fixture.topics as [Hex, ...Hex[]], data: fixture.data });
+    const reencoded = encodeAbiParameters(
+      d.event.abi.inputs,
+      d.event.abi.inputs.map((i) => (raw.args as Record<string, unknown>)[i.name as string]),
+    );
+    expect(reencoded).toBe(fixture.data);
+  });
+
+  // ---- 2026-09-29: OpenZeppelin Governor extensions (gap scan 29 Sep row 2) ----
+
+  it('registers the OZ Governor late-quorum, quorum-fraction and timelock keys and decodes the real Compound 610 ProposalExtended log', () => {
+    // Sources: OpenZeppelin/openzeppelin-contracts master governance/extensions/GovernorPreventLateQuorum.sol,
+    // GovernorVotesQuorumFraction.sol, GovernorTimelockControl.sol.
+    const want: Record<string, [string, string, string]> = {
+      'governor.proposal_extended': ['governance', 'info', 'ProposalExtended(uint256,uint64)'],
+      'governor.late_quorum_extension_set': ['governance', 'high', 'LateQuorumVoteExtensionSet(uint64,uint64)'],
+      'governor.quorum_numerator_updated': ['governance', 'high', 'QuorumNumeratorUpdated(uint256,uint256)'],
+      'governor.timelock_changed': ['governance', 'critical', 'TimelockChange(address,address)'],
+    };
+    for (const [key, [category, severity, signature]] of Object.entries(want)) {
+      const entries = byKey(key);
+      expect(entries.length, key).toBe(1);
+      const ev = entries[0]!;
+      expect(ev.category, key).toBe(category);
+      expect(ev.severity, key).toBe(severity);
+      expect(ev.topic0, key).toBe(keccak256(toBytes(signature)));
+      expect(EVENTS_BY_TOPIC0.get(ev.topic0)?.map((e) => e.key), key).toEqual([key]);
+    }
+    expect(firstByKey('governor.proposal_extended').abi.inputs.map((i) => [i.name, i.indexed ?? false])).toEqual([['proposalId', true], ['extendedDeadline', false]]);
+
+    // mainnet.gateway.tenderly.co eth_getLogs on Compound Governor 0x309a…c8c0, block 26076170 (0x18de40a), read
+    // 2026-09-29: tx 0x6070555c5ec8f4671043ed0ba06c7ae1b41fb67f26a284a9f777c69ee82f98a6, logIndex 393, right after
+    // the VoteCast (logIndex 392) that pushed proposal 610 over quorum. data 0x18e1c4a = block 26,090,570.
+    const topic0 = '0x541f725fb9f7c98a30cc9c0ff32fbb14358cd7159c847a3aa20a2bdc442ba511';
+    expect(firstByKey('governor.proposal_extended').topic0).toBe(topic0);
+    const d = decodeWatchedLog({
+      topics: [topic0, '0x0000000000000000000000000000000000000000000000000000000000000262'],
+      data: '0x00000000000000000000000000000000000000000000000000000000018e1c4a',
+    })!;
+    expect(d.event.key).toBe('governor.proposal_extended');
+    expect(d.args).toEqual({ proposalId: '610', extendedDeadline: '26090570' });
+    expect(d.initAnchor).toBe(false);
+    const tl = decodeWatchedLog(encodeLog(firstByKey('governor.timelock_changed').abi, { oldTimelock: ALICE, newTimelock: BOB }))!;
+    expect(tl.args).toEqual({ oldTimelock: ALICE.toLowerCase(), newTimelock: BOB.toLowerCase() });
+  });
+
+  // ---- 2026-09-29: Aave Governance V3 core + PayloadsController (gap scan 29 Sep row 3) ----
+
+  it('registers the Aave Governance V3 core and PayloadsController keys with byte-exact topic0s and the shared governor layouts', () => {
+    // Sources: bgd-labs/aave-governance-v3 main src/interfaces/IGovernanceCore.sol,
+    // src/contracts/payloads/interfaces/IPayloadsControllerCore.sol, PayloadsControllerUtils.sol (AccessControl = uint8),
+    // aave-delivery-infrastructure old-oz/interfaces/IWithGuardian.sol.
+    const want: Record<string, [string, string, string]> = {
+      'governor.voting_activated': ['governance', 'info', 'VotingActivated(uint256,bytes32,uint24)'],
+      'governor.proposal_failed': ['governance', 'info', 'ProposalFailed(uint256,uint128,uint128)'],
+      'governor.voting_config_updated': ['governance', 'critical', 'VotingConfigUpdated(uint8,uint24,uint24,uint256,uint256,uint256)'],
+      'governor.power_strategy_updated': ['governance', 'critical', 'PowerStrategyUpdated(address)'],
+      'governor.voting_portal_updated': ['governance', 'critical', 'VotingPortalUpdated(address,bool)'],
+      'ownable.guardian_updated': ['ownership', 'critical', 'GuardianUpdated(address,address)'],
+      'payloads.created': ['governance', 'info', 'PayloadCreated(uint40,address,(address,bool,uint8,uint256,string,bytes)[],uint8)'],
+      'payloads.queued': ['timelock', 'high', 'PayloadQueued(uint40)'],
+      'payloads.executed': ['timelock', 'info', 'PayloadExecuted(uint40)'],
+      'payloads.cancelled': ['timelock', 'info', 'PayloadCancelled(uint40)'],
+      'payloads.executor_set': ['access', 'critical', 'ExecutorSet(uint8,address,uint40)'],
+    };
+    expect(Object.keys(want)).toHaveLength(11);
+    for (const [key, [category, severity, signature]] of Object.entries(want)) {
+      const entries = byKey(key);
+      expect(entries.length, key).toBe(1);
+      const ev = entries[0]!;
+      expect(ev.category, key).toBe(category);
+      expect(ev.severity, key).toBe(severity);
+      expect(ev.topic0, key).toBe(keccak256(toBytes(signature)));
+      expect(EVENTS_BY_TOPIC0.get(ev.topic0)?.map((e) => e.key), key).toEqual([key]);
+    }
+    // The Aave layouts under the shared governor keys.
+    const layout = (key: string, sig: string) => byKey(key).find((e) => e.topic0 === keccak256(toBytes(sig)));
+    expect(byKey('governor.proposal_created')).toHaveLength(3);
+    expect(layout('governor.proposal_created', 'ProposalCreated(uint256,address,uint8,bytes32)')?.abi.inputs.map((i) => [i.name, i.indexed ?? false])).toEqual([
+      ['proposalId', true],
+      ['creator', true],
+      ['accessLevel', true],
+      ['ipfsHash', false],
+    ]);
+    expect(layout('governor.proposal_queued', 'ProposalQueued(uint256,uint128,uint128)')?.abi.inputs.map((i) => i.name)).toEqual(['proposalId', 'votesFor', 'votesAgainst']);
+    expect(new Set(byKey('governor.proposal_queued').map((e) => e.topic0)).size).toBe(2);
+    // ProposalExecuted / ProposalCanceled: same topic0, the Aave layout indexes the id.
+    for (const key of ['governor.proposal_executed', 'governor.proposal_canceled']) {
+      expect(new Set(byKey(key).map((e) => e.topic0)).size, key).toBe(1);
+      expect(byKey(key).map((e) => e.abi.inputs[0]?.indexed ?? false).sort(), key).toEqual([false, true]);
+    }
+  });
+
+  it('decodes the real AIP #523 ProposalCreated / VotingActivated and the PayloadCreated 471 (Ethereum) and 117 (Base) logs', () => {
+    // mainnet.gateway.tenderly.co eth_getLogs on the Governance V3 core 0x9AEE…2BC7 filtered on proposalId 523, read
+    // 2026-09-29: ProposalCreated at block 26053649 (tx 0x4fa7ab586a9ed9ea61fb7073b848d8b41579c8e09cebc736f35b51f491b5b548,
+    // logIndex 676, 2026-09-25 03:43:59 UTC), VotingActivated at block 26060812 (tx 0xc4173bb0…fb18, logIndex 142).
+    const CORE_CREATED = '0xcc914becfa276bbc067049bf8db2d34ebbdc1bafa851e4d4936aaed376c08dbe';
+    const ID_523 = '0x000000000000000000000000000000000000000000000000000000000000020b';
+    const created = decodeWatchedLog({
+      topics: [CORE_CREATED, ID_523, '0x00000000000000000000000066a28531e6f390a8cd44ab0c57a0f1aeb7e673ff', '0x0000000000000000000000000000000000000000000000000000000000000001'],
+      data: '0x73786bbdbef87459ae40c07e2c165b70288955e1c4252801b61a07adff533795',
+    })!;
+    expect(created.event.key).toBe('governor.proposal_created');
+    expect(created.event.abi.inputs).toHaveLength(4);
+    expect(created.args).toEqual({
+      proposalId: '523',
+      creator: '0x66a28531e6f390a8cd44ab0c57a0f1aeb7e673ff',
+      accessLevel: 1,
+      ipfsHash: '0x73786bbdbef87459ae40c07e2c165b70288955e1c4252801b61a07adff533795',
+    });
+    expect(created.initAnchor).toBe(false);
+
+    const activated = decodeWatchedLog({
+      topics: ['0x45f1db29750f423920a6edede3a80ea19ceb9de3eabc072078eb539ca348dca0', ID_523, '0xda1ae758e3949c1512d8af326d3dcaa1826601baa2ea0736591012e8d7c0c09a'],
+      data: '0x000000000000000000000000000000000000000000000000000000000003f480',
+    })!;
+    expect(activated.event.key).toBe('governor.voting_activated');
+    expect(activated.args).toEqual({ proposalId: '523', snapshotBlockHash: '0xda1ae758e3949c1512d8af326d3dcaa1826601baa2ea0736591012e8d7c0c09a', votingDuration: 259200 });
+
+    // PayloadCreated 471 on the Ethereum PayloadsController 0xdAba…AEc5 (tenderly, block 26048266, tx
+    // 0x9fec8a69a94cebfa90dd854dfcef812d81dd3446ed94a93eaa18c30ffcb1705c, logIndex 654) and 117 on the Base one
+    // 0x2DC2…ab01 (mainnet.base.org, block 51737615, tx 0x20826e59a2479af73e8555ace2a2556fb5df26f6953828fc4ea5c89407d5662c,
+    // logIndex 625): one delegatecall `execute()` each, on 0xE145…ED46 (Ethereum) and 0xb4Fd…e997 (Base).
+    const PAYLOAD_CREATED = '0x1e4588da4731f84a598f061ee45829a6450aa00aa28962657b6835641afbbac5';
+    const CREATOR = '0x000000000000000000000000430c5b2daad87227f15412ab15f04c7371808f71';
+    const LEVEL_1 = '0x0000000000000000000000000000000000000000000000000000000000000001';
+    const actionsData = (target: string): Hex =>
+      `0x${[
+        '0000000000000000000000000000000000000000000000000000000000000020',
+        '0000000000000000000000000000000000000000000000000000000000000001',
+        '0000000000000000000000000000000000000000000000000000000000000020',
+        `000000000000000000000000${target}`,
+        '0000000000000000000000000000000000000000000000000000000000000001',
+        '0000000000000000000000000000000000000000000000000000000000000001',
+        '0000000000000000000000000000000000000000000000000000000000000000',
+        '00000000000000000000000000000000000000000000000000000000000000c0',
+        '0000000000000000000000000000000000000000000000000000000000000100',
+        '0000000000000000000000000000000000000000000000000000000000000009',
+        '6578656375746528290000000000000000000000000000000000000000000000',
+        '0000000000000000000000000000000000000000000000000000000000000000',
+      ].join('')}`;
+    const ethData = actionsData('e145229000287bbb0f0d28eb4677172aff8ced46');
+    expect((ethData.length - 2) / 2).toBe(384);
+    const p471 = decodeWatchedLog({
+      topics: [PAYLOAD_CREATED, '0x00000000000000000000000000000000000000000000000000000000000001d7', CREATOR, LEVEL_1],
+      data: ethData,
+    })!;
+    expect(p471.event.key).toBe('payloads.created');
+    expect(p471.event.severity).toBe('info');
+    expect(p471.args).toEqual({
+      payloadId: 471,
+      creator: '0x430c5b2daad87227f15412ab15f04c7371808f71',
+      maximumAccessLevelRequired: 1,
+      actions: [{ target: '0xe145229000287bbb0f0d28eb4677172aff8ced46', withDelegateCall: true, accessLevel: 1, value: '0', signature: 'execute()', callData: '0x' }],
+    });
+    const p117 = decodeWatchedLog({
+      topics: [PAYLOAD_CREATED, '0x0000000000000000000000000000000000000000000000000000000000000075', CREATOR, LEVEL_1],
+      data: actionsData('b4fd1d9a8cf9b5cd0552604f6251ed352152e997'),
+    })!;
+    expect(p117.args['payloadId']).toBe(117);
+    expect((p117.args['actions'] as Array<Record<string, unknown>>)[0]?.['target']).toBe('0xb4fd1d9a8cf9b5cd0552604f6251ed352152e997');
+    // Byte-exact: the two data blobs re-encode from the decoded actions.
+    const abi = firstByKey('payloads.created').abi;
+    const raw = decodeEventLog({ abi: [abi], topics: [PAYLOAD_CREATED, '0x00000000000000000000000000000000000000000000000000000000000001d7', CREATOR, LEVEL_1], data: ethData });
+    const nonIndexed = abi.inputs.filter((i) => !i.indexed);
+    expect(encodeAbiParameters(nonIndexed, nonIndexed.map((i) => (raw.args as Record<string, unknown>)[i.name as string]))).toBe(ethData);
+
+    // The rest of the family round-trips through encodeLog.
+    const queued = decodeWatchedLog(encodeLog(firstByKey('payloads.queued').abi, { payloadId: 471 }))!;
+    expect(queued.args).toEqual({ payloadId: 471 });
+    const exec = decodeWatchedLog(encodeLog(firstByKey('payloads.executor_set').abi, { accessLevel: 1, executor: ALICE, delay: 86400 }))!;
+    expect(exec.args).toEqual({ accessLevel: 1, executor: ALICE.toLowerCase(), delay: 86400 });
+    const aaveQueued = byKey('governor.proposal_queued').find((e) => e.abi.inputs.length === 3)!;
+    const q = decodeWatchedLog(encodeLog(aaveQueued.abi, { proposalId: 523n, votesFor: 561138n * 10n ** 18n, votesAgainst: 0n }))!;
+    expect(q.event.key).toBe('governor.proposal_queued');
+    expect(q.args).toEqual({ proposalId: '523', votesFor: '561138000000000000000000', votesAgainst: '0' });
+    // Indexed ProposalExecuted (Aave) and the non-indexed OZ one both decode under the same key.
+    const aaveExec = byKey('governor.proposal_executed').find((e) => e.abi.inputs[0]?.indexed)!;
+    expect(decodeWatchedLog(encodeLog(aaveExec.abi, { proposalId: 523n }))!.args).toEqual({ proposalId: '523' });
+    const ozExec = byKey('governor.proposal_executed').find((e) => !e.abi.inputs[0]?.indexed)!;
+    expect(decodeWatchedLog(encodeLog(ozExec.abi, { proposalId: 608n }))!.args).toEqual({ proposalId: '608' });
+    const guardian = decodeWatchedLog(encodeLog(firstByKey('ownable.guardian_updated').abi, { oldGuardian: ALICE, newGuardian: BOB }))!;
+    expect(guardian.args).toEqual({ oldGuardian: ALICE.toLowerCase(), newGuardian: BOB.toLowerCase() });
   });
 
   it('registers the Maker auth, Chainlink aggregator and Curve ownership keys with the agreed category/severity', () => {

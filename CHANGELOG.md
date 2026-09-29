@@ -3,6 +3,33 @@
 All notable changes to this package are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semver.
 
+## [0.4.0] - 2026-09-29
+
+Governance surfaces: proposals are now visible at creation, not only at queue and execution,
+for the three governor families we watch. Sources per block in `src/registry.ts`; every topic0
+re-derived in the tests; one real log per family decodes byte-exactly (VIP-664 creation on BNB,
+Compound 610's late-quorum extension, AIP #523 creation and payloads 471 / 117).
+
+### Added
+
+- `governor.proposal_created`: Venus Governor Bravo layout (ten arguments, trailing
+  `proposalType`) and Aave Governance V3 layout (`proposalId, creator, accessLevel, ipfsHash`).
+- `governor.proposal_queued`: Aave Governance V3 overload with the vote tallies.
+- OpenZeppelin Governor: `governor.proposal_extended` (GovernorPreventLateQuorum),
+  `governor.late_quorum_extension_set`, `governor.quorum_numerator_updated`, `governor.timelock_changed`,
+  and the shared setters `governor.voting_delay_set`, `governor.voting_period_set`,
+  `governor.proposal_threshold_set` (byte-identical in Compound Bravo, Venus and OZ).
+- Venus Governor Bravo: `governor.guardian_set`, `governor.proposal_max_operations_updated`,
+  `governor.validation_params_set`, `governor.proposal_configs_set`.
+- Aave Governance V3 core: `governor.voting_activated`, `governor.proposal_failed`,
+  `governor.voting_config_updated`, `governor.power_strategy_updated`, `governor.voting_portal_updated`,
+  `ownable.guardian_updated`.
+- Aave PayloadsController: `payloads.created`, `payloads.queued`, `payloads.executed`,
+  `payloads.cancelled`, `payloads.executor_set`.
+- Roles: Ethena `REWARDER_ROLE`, `BLACKLIST_MANAGER_ROLE`, `SOFT_RESTRICTED_STAKER_ROLE`,
+  `FULL_RESTRICTED_STAKER_ROLE`, `REDEEMER_ROLE`, `COLLATERAL_MANAGER_ROLE`, `GATEKEEPER_ROLE`.
+- Registry is now 330 signatures under 279 keys.
+
 ## [0.3.0] - 2026-09-29
 
 Two governance surfaces that sit next to the timelocks and Safes we already read, plus one
